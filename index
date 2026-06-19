@@ -1,0 +1,1226 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Patrimônio Imobiliário</title>
+<style>
+  :root {
+    --bg: #F7F6F3;
+    --surface: #FFFFFF;
+    --surface2: #F0EEE9;
+    --border: #E2DED6;
+    --border2: #C8C4BC;
+    --text: #1A1916;
+    --text2: #6B6860;
+    --text3: #9B9890;
+    --accent: #1B4F3A;
+    --accent-light: #E8F0EC;
+    --accent2: #2D7A57;
+    --danger: #C0392B;
+    --danger-light: #FDECEA;
+    --warning: #B7770D;
+    --warning-light: #FEF3DC;
+    --success: #1B6B3A;
+    --success-light: #E6F4ED;
+    --radius: 10px;
+    --radius-sm: 6px;
+    --mono: 'Courier New', monospace;
+  }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; background: var(--bg); color: var(--text); font-size: 14px; line-height: 1.5; }
+
+  /* Layout */
+  .app { display: flex; min-height: 100vh; }
+  .sidebar { width: 220px; min-height: 100vh; background: var(--accent); display: flex; flex-direction: column; padding: 0; flex-shrink: 0; }
+  .sidebar-logo { padding: 24px 20px 20px; border-bottom: 1px solid rgba(255,255,255,0.1); }
+  .sidebar-logo h1 { font-size: 15px; font-weight: 600; color: #fff; letter-spacing: -0.3px; }
+  .sidebar-logo p { font-size: 11px; color: rgba(255,255,255,0.5); margin-top: 2px; }
+  .sidebar-nav { flex: 1; padding: 12px 0; }
+  .nav-item { display: flex; align-items: center; gap: 10px; padding: 10px 20px; font-size: 13px; color: rgba(255,255,255,0.65); cursor: pointer; transition: all 0.15s; border-left: 3px solid transparent; }
+  .nav-item:hover { color: #fff; background: rgba(255,255,255,0.08); }
+  .nav-item.active { color: #fff; background: rgba(255,255,255,0.12); border-left-color: #fff; }
+  .nav-item svg { width: 16px; height: 16px; flex-shrink: 0; }
+  .sidebar-bottom { padding: 16px 20px; border-top: 1px solid rgba(255,255,255,0.1); }
+  .gist-status { font-size: 11px; color: rgba(255,255,255,0.5); display: flex; align-items: center; gap: 6px; }
+  .gist-dot { width: 6px; height: 6px; border-radius: 50%; background: #6ee7b7; }
+  .gist-dot.off { background: rgba(255,255,255,0.3); }
+
+  .main { flex: 1; display: flex; flex-direction: column; overflow: hidden; }
+  .topbar { background: var(--surface); border-bottom: 1px solid var(--border); padding: 0 28px; height: 56px; display: flex; align-items: center; justify-content: space-between; flex-shrink: 0; }
+  .topbar-title { font-size: 16px; font-weight: 600; color: var(--text); }
+  .topbar-actions { display: flex; gap: 8px; align-items: center; }
+  .content { flex: 1; padding: 28px; overflow-y: auto; }
+
+  /* Buttons */
+  .btn { display: inline-flex; align-items: center; gap: 6px; padding: 8px 16px; border-radius: var(--radius-sm); font-size: 13px; font-weight: 500; cursor: pointer; border: none; transition: all 0.15s; }
+  .btn-primary { background: var(--accent); color: #fff; }
+  .btn-primary:hover { background: var(--accent2); }
+  .btn-secondary { background: var(--surface); border: 1px solid var(--border2); color: var(--text); }
+  .btn-secondary:hover { background: var(--surface2); }
+  .btn-ghost { background: transparent; border: 1px solid transparent; color: var(--text2); }
+  .btn-ghost:hover { background: var(--surface2); color: var(--text); }
+  .btn-danger { background: var(--danger-light); border: 1px solid #f5c6c2; color: var(--danger); }
+  .btn-sm { padding: 5px 10px; font-size: 12px; }
+  .btn svg { width: 14px; height: 14px; }
+
+  /* Cards */
+  .card { background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius); padding: 20px; }
+  .card-header { display: flex; align-items: center; justify-content: space-between; margin-bottom: 16px; }
+  .card-title { font-size: 13px; font-weight: 600; color: var(--text2); text-transform: uppercase; letter-spacing: 0.05em; }
+
+  /* Metric cards */
+  .metrics-grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 12px; margin-bottom: 20px; }
+  .metric-card { background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius); padding: 16px 18px; }
+  .metric-label { font-size: 11px; color: var(--text3); font-weight: 500; text-transform: uppercase; letter-spacing: 0.06em; margin-bottom: 6px; }
+  .metric-value { font-size: 22px; font-weight: 600; color: var(--text); letter-spacing: -0.5px; }
+  .metric-sub { font-size: 11px; color: var(--text3); margin-top: 4px; }
+  .metric-pos { color: var(--success); }
+  .metric-neg { color: var(--danger); }
+  .metric-warn { color: var(--warning); }
+
+  /* Tags / badges */
+  .tag { display: inline-flex; align-items: center; padding: 2px 8px; border-radius: 20px; font-size: 11px; font-weight: 500; }
+  .tag-ok { background: var(--success-light); color: var(--success); }
+  .tag-warn { background: var(--warning-light); color: var(--warning); }
+  .tag-danger { background: var(--danger-light); color: var(--danger); }
+  .tag-info { background: var(--accent-light); color: var(--accent); }
+
+  /* Table */
+  .table-wrap { overflow-x: auto; }
+  table { width: 100%; border-collapse: collapse; }
+  th { font-size: 11px; font-weight: 600; color: var(--text3); text-transform: uppercase; letter-spacing: 0.05em; padding: 10px 12px; text-align: left; border-bottom: 1px solid var(--border); background: var(--surface2); }
+  td { padding: 12px; border-bottom: 1px solid var(--border); font-size: 13px; color: var(--text); vertical-align: middle; }
+  tr:last-child td { border-bottom: none; }
+  tr:hover td { background: var(--surface2); }
+  .td-right { text-align: right; }
+  .td-mono { font-family: var(--mono); font-size: 12px; }
+
+  /* Forms */
+  .form-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; }
+  .form-grid-3 { grid-template-columns: 1fr 1fr 1fr; }
+  .form-full { grid-column: 1 / -1; }
+  .form-group { display: flex; flex-direction: column; gap: 6px; }
+  .form-group label { font-size: 12px; font-weight: 500; color: var(--text2); }
+  .form-group input, .form-group select, .form-group textarea {
+    padding: 9px 12px; border: 1px solid var(--border2); border-radius: var(--radius-sm);
+    font-size: 13px; color: var(--text); background: var(--surface); outline: none;
+    transition: border-color 0.15s; font-family: inherit;
+  }
+  .form-group input:focus, .form-group select:focus { border-color: var(--accent2); box-shadow: 0 0 0 3px var(--accent-light); }
+  .form-hint { font-size: 11px; color: var(--text3); }
+
+  /* Bar */
+  .bar-wrap { height: 6px; background: var(--surface2); border-radius: 3px; overflow: hidden; margin-top: 4px; }
+  .bar-fill { height: 100%; border-radius: 3px; transition: width 0.3s; }
+  .bar-ok { background: var(--accent2); }
+  .bar-warn { background: var(--warning); }
+  .bar-danger { background: var(--danger); }
+
+  /* Modal */
+  .modal-overlay { position: fixed; inset: 0; background: rgba(0,0,0,0.4); display: flex; align-items: center; justify-content: center; z-index: 100; padding: 20px; }
+  .modal { background: var(--surface); border-radius: var(--radius); width: 100%; max-width: 620px; max-height: 90vh; overflow-y: auto; box-shadow: 0 20px 60px rgba(0,0,0,0.15); }
+  .modal-header { padding: 20px 24px 16px; border-bottom: 1px solid var(--border); display: flex; align-items: center; justify-content: space-between; }
+  .modal-header h2 { font-size: 16px; font-weight: 600; }
+  .modal-body { padding: 24px; }
+  .modal-footer { padding: 16px 24px; border-top: 1px solid var(--border); display: flex; justify-content: flex-end; gap: 8px; }
+
+  /* Section */
+  .section-title { font-size: 13px; font-weight: 600; color: var(--text2); margin-bottom: 12px; padding-bottom: 8px; border-bottom: 1px solid var(--border); }
+  .divider { height: 1px; background: var(--border); margin: 20px 0; }
+
+  /* Alert */
+  .alert { padding: 12px 16px; border-radius: var(--radius-sm); font-size: 13px; margin-bottom: 16px; }
+  .alert-info { background: var(--accent-light); color: var(--accent); border: 1px solid #b8d9cb; }
+  .alert-warn { background: var(--warning-light); color: var(--warning); border: 1px solid #f5dfa0; }
+
+  /* Charts */
+  .chart-bar-row { display: flex; align-items: center; gap: 10px; margin-bottom: 10px; }
+  .chart-bar-label { font-size: 12px; color: var(--text2); width: 160px; flex-shrink: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .chart-bar-track { flex: 1; height: 8px; background: var(--surface2); border-radius: 4px; overflow: hidden; }
+  .chart-bar-fill { height: 100%; border-radius: 4px; }
+  .chart-bar-value { font-size: 12px; font-weight: 500; width: 60px; text-align: right; flex-shrink: 0; font-family: var(--mono); }
+
+  /* Amortization table */
+  .amort-header { display: grid; grid-template-columns: 50px 1fr 1fr 1fr 1fr; gap: 8px; padding: 8px 12px; background: var(--surface2); border-radius: var(--radius-sm) var(--radius-sm) 0 0; font-size: 11px; font-weight: 600; color: var(--text3); text-transform: uppercase; letter-spacing: 0.05em; }
+  .amort-row { display: grid; grid-template-columns: 50px 1fr 1fr 1fr 1fr; gap: 8px; padding: 8px 12px; border-bottom: 1px solid var(--border); font-size: 12px; font-family: var(--mono); }
+  .amort-row:last-child { border-bottom: none; }
+  .amort-row:hover { background: var(--surface2); }
+
+  /* Gist config */
+  .config-panel { background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius); padding: 24px; max-width: 500px; margin: 0 auto; }
+
+  /* Empty state */
+  .empty { text-align: center; padding: 60px 20px; }
+  .empty-icon { font-size: 40px; margin-bottom: 12px; opacity: 0.3; }
+  .empty h3 { font-size: 15px; font-weight: 600; color: var(--text); margin-bottom: 6px; }
+  .empty p { font-size: 13px; color: var(--text2); margin-bottom: 20px; }
+
+  /* Tabs */
+  .tabs { display: flex; gap: 2px; border-bottom: 1px solid var(--border); margin-bottom: 20px; }
+  .tab { padding: 10px 16px; font-size: 13px; font-weight: 500; color: var(--text2); cursor: pointer; border-bottom: 2px solid transparent; margin-bottom: -1px; transition: all 0.15s; }
+  .tab:hover { color: var(--text); }
+  .tab.active { color: var(--accent); border-bottom-color: var(--accent); }
+
+  .hidden { display: none !important; }
+  .flex { display: flex; }
+  .gap-8 { gap: 8px; }
+  .gap-12 { gap: 12px; }
+  .mt-4 { margin-top: 4px; }
+  .mt-12 { margin-top: 12px; }
+  .mt-16 { margin-top: 16px; }
+  .mt-20 { margin-top: 20px; }
+  .mb-16 { margin-bottom: 16px; }
+  .text-right { text-align: right; }
+  .text-mono { font-family: var(--mono); }
+  .fw-600 { font-weight: 600; }
+  .color-success { color: var(--success); }
+  .color-danger { color: var(--danger); }
+  .color-warn { color: var(--warning); }
+  .color-muted { color: var(--text2); }
+  .two-col { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; }
+  .three-col { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 16px; }
+</style>
+</head>
+<body>
+
+<div class="app">
+  <!-- SIDEBAR -->
+  <nav class="sidebar">
+    <div class="sidebar-logo">
+      <h1>Patrimônio</h1>
+      <p>Gestão imobiliária</p>
+    </div>
+    <div class="sidebar-nav">
+      <div class="nav-item active" onclick="showPage('dashboard')">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="7" height="7"/><rect x="14" y="3" width="7" height="7"/><rect x="3" y="14" width="7" height="7"/><rect x="14" y="14" width="7" height="7"/></svg>
+        Painel geral
+      </div>
+      <div class="nav-item" onclick="showPage('imoveis')">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 9l9-7 9 7v11a2 2 0 01-2 2H5a2 2 0 01-2-2z"/><polyline points="9,22 9,12 15,12 15,22"/></svg>
+        Imóveis
+      </div>
+      <div class="nav-item" onclick="showPage('financiamento')">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="12" y1="1" x2="12" y2="23"/><path d="M17 5H9.5a3.5 3.5 0 000 7h5a3.5 3.5 0 010 7H6"/></svg>
+        Financiamentos
+      </div>
+      <div class="nav-item" onclick="showPage('fluxo')">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="22,12 18,12 15,21 9,3 6,12 2,12"/></svg>
+        Fluxo de caixa
+      </div>
+      <div class="nav-item" onclick="showPage('analise')">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="18" y1="20" x2="18" y2="10"/><line x1="12" y1="20" x2="12" y2="4"/><line x1="6" y1="20" x2="6" y2="14"/></svg>
+        Análise
+      </div>
+      <div class="nav-item" onclick="showPage('config')">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="3"/><path d="M19.07 4.93a10 10 0 010 14.14M4.93 4.93a10 10 0 000 14.14"/></svg>
+        Configurações
+      </div>
+    </div>
+    <div class="sidebar-bottom">
+      <div class="gist-status">
+        <div class="gist-dot off" id="gist-dot"></div>
+        <span id="gist-status-text">Gist desconectado</span>
+      </div>
+    </div>
+  </nav>
+
+  <!-- MAIN -->
+  <div class="main">
+    <div class="topbar">
+      <span class="topbar-title" id="page-title">Painel geral</span>
+      <div class="topbar-actions" id="topbar-actions"></div>
+    </div>
+    <div class="content" id="content"></div>
+  </div>
+</div>
+
+<!-- MODAL -->
+<div class="modal-overlay hidden" id="modal-overlay" onclick="closeModalOnOverlay(event)">
+  <div class="modal" id="modal">
+    <div class="modal-header">
+      <h2 id="modal-title"></h2>
+      <button class="btn btn-ghost btn-sm" onclick="closeModal()">✕</button>
+    </div>
+    <div class="modal-body" id="modal-body"></div>
+    <div class="modal-footer" id="modal-footer"></div>
+  </div>
+</div>
+
+<script>
+// ─── STATE ───────────────────────────────────────────────────────────────────
+let state = {
+  imoveis: [],
+  lancamentos: [],
+  gistToken: '',
+  gistId: '',
+  currentPage: 'dashboard'
+};
+
+// ─── PERSISTENCE ─────────────────────────────────────────────────────────────
+function saveLocal() {
+  localStorage.setItem('patrimonio_state', JSON.stringify(state));
+}
+
+function loadLocal() {
+  const s = localStorage.getItem('patrimonio_state');
+  if (s) {
+    try { state = { ...state, ...JSON.parse(s) }; } catch(e) {}
+  }
+}
+
+async function saveGist() {
+  if (!state.gistToken || !state.gistId) return;
+  const data = { imoveis: state.imoveis, lancamentos: state.lancamentos };
+  try {
+    await fetch(`https://api.github.com/gists/${state.gistId}`, {
+      method: 'PATCH',
+      headers: { Authorization: `token ${state.gistToken}`, 'Content-Type': 'application/json' },
+      body: JSON.stringify({ files: { 'patrimonio.json': { content: JSON.stringify(data, null, 2) } } })
+    });
+  } catch(e) { console.error('Gist save error', e); }
+}
+
+async function loadGist() {
+  if (!state.gistToken || !state.gistId) return false;
+  try {
+    const r = await fetch(`https://api.github.com/gists/${state.gistId}`, {
+      headers: { Authorization: `token ${state.gistToken}` }
+    });
+    if (!r.ok) return false;
+    const gist = await r.json();
+    const content = gist.files['patrimonio.json']?.content;
+    if (content) {
+      const data = JSON.parse(content);
+      state.imoveis = data.imoveis || [];
+      state.lancamentos = data.lancamentos || [];
+      saveLocal();
+    }
+    return true;
+  } catch(e) { return false; }
+}
+
+async function createGist(token) {
+  const r = await fetch('https://api.github.com/gists', {
+    method: 'POST',
+    headers: { Authorization: `token ${token}`, 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      description: 'Patrimônio Imobiliário - dados privados',
+      public: false,
+      files: { 'patrimonio.json': { content: JSON.stringify({ imoveis: [], lancamentos: [] }, null, 2) } }
+    })
+  });
+  if (!r.ok) throw new Error('Token inválido ou sem permissão');
+  const gist = await r.json();
+  return gist.id;
+}
+
+function updateGistStatus() {
+  const dot = document.getElementById('gist-dot');
+  const txt = document.getElementById('gist-status-text');
+  if (state.gistToken && state.gistId) {
+    dot.classList.remove('off');
+    txt.textContent = 'Gist conectado';
+  } else {
+    dot.classList.add('off');
+    txt.textContent = 'Gist desconectado';
+  }
+}
+
+// ─── SAVE (local + gist) ─────────────────────────────────────────────────────
+function save() {
+  saveLocal();
+  saveGist();
+}
+
+// ─── FORMATTERS ──────────────────────────────────────────────────────────────
+function fmtBRL(n) {
+  if (n == null || isNaN(n)) return '—';
+  return new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL', maximumFractionDigits: 0 }).format(n);
+}
+function fmtPct(n, decimals = 1) {
+  if (n == null || isNaN(n)) return '—';
+  return n.toFixed(decimals) + '%';
+}
+function parseBRL(s) {
+  if (!s) return 0;
+  return parseFloat(s.toString().replace(/[^\d,.-]/g, '').replace(',', '.')) || 0;
+}
+function fmtDate(d) {
+  if (!d) return '—';
+  const [y, m] = d.split('-');
+  return `${m}/${y}`;
+}
+function monthsBetween(d1, d2) {
+  const a = new Date(d1), b = new Date(d2);
+  return (b.getFullYear() - a.getFullYear()) * 12 + (b.getMonth() - a.getMonth());
+}
+
+// ─── FINANCE CALCS ───────────────────────────────────────────────────────────
+function calcParcelaSAC(saldo, taxaMensal, prazoMeses) {
+  const amort = saldo / prazoMeses;
+  const juros = saldo * taxaMensal;
+  return { parcela: amort + juros, amort, juros };
+}
+
+function calcParcelaPrice(saldo, taxaMensal, prazoMeses) {
+  if (taxaMensal === 0) return { parcela: saldo / prazoMeses, amort: saldo / prazoMeses, juros: 0 };
+  const p = saldo * (taxaMensal * Math.pow(1 + taxaMensal, prazoMeses)) / (Math.pow(1 + taxaMensal, prazoMeses) - 1);
+  return { parcela: p, amort: p - saldo * taxaMensal, juros: saldo * taxaMensal };
+}
+
+function gerarAmortizacao(imovel) {
+  if (!imovel.financiamento) return [];
+  const { saldoDevedor, taxaJurosMensal, prazoMeses, sistema } = imovel.financiamento;
+  const rows = [];
+  let saldo = saldoDevedor;
+  for (let i = 1; i <= prazoMeses; i++) {
+    const { parcela, amort, juros } = sistema === 'SAC'
+      ? calcParcelaSAC(saldo, taxaJurosMensal / 100, prazoMeses - i + 1)
+      : calcParcelaPrice(saldo, taxaJurosMensal / 100, prazoMeses - i + 1);
+    rows.push({ mes: i, parcela, amort, juros, saldo });
+    saldo -= amort;
+    if (saldo < 0) saldo = 0;
+  }
+  return rows;
+}
+
+function calcTotalJurosPagos(imovel, ateData) {
+  const rows = gerarAmortizacao(imovel);
+  const inicio = new Date(imovel.financiamento?.dataInicio || imovel.dataAquisicao);
+  const ate = new Date(ateData || new Date());
+  let totalJuros = 0;
+  let totalParcelas = 0;
+  rows.forEach((r, i) => {
+    const d = new Date(inicio);
+    d.setMonth(d.getMonth() + i);
+    if (d <= ate) {
+      totalJuros += r.juros;
+      totalParcelas += r.parcela;
+    }
+  });
+  return { totalJuros, totalParcelas };
+}
+
+function calcSaldoAtual(imovel) {
+  const rows = gerarAmortizacao(imovel);
+  const inicio = new Date(imovel.financiamento?.dataInicio || imovel.dataAquisicao);
+  const hoje = new Date();
+  let saldo = imovel.financiamento?.saldoDevedor || 0;
+  rows.forEach((r, i) => {
+    const d = new Date(inicio);
+    d.setMonth(d.getMonth() + i);
+    if (d <= hoje) saldo = Math.max(0, saldo - r.amort);
+  });
+  return saldo;
+}
+
+function calcCustoTotalAcumulado(imovel) {
+  const aqs = imovel.precoAquisicao || 0;
+  const entrada = imovel.financiamento?.entrada || 0;
+  const { totalParcelas } = calcTotalJurosPagos(imovel);
+  const lancamentos = (state.lancamentos || [])
+    .filter(l => l.imovelId === imovel.id && l.tipo === 'saida')
+    .reduce((s, l) => s + (l.valor || 0), 0);
+  return aqs + totalParcelas + lancamentos;
+}
+
+function calcValorizacaoMinima(imovel, anos) {
+  const custo = calcCustoTotalAcumulado(imovel);
+  const vm = imovel.valorMercado || imovel.precoAquisicao || 0;
+  if (!anos || anos <= 0 || !custo) return null;
+  // Valorização anual necessária para que VF = custo total
+  return (Math.pow(custo / vm, 1 / anos) - 1) * 100;
+}
+
+function calcPatrimonioLiquido() {
+  return state.imoveis.reduce((s, im) => {
+    const vm = im.valorMercado || im.precoAquisicao || 0;
+    const saldo = calcSaldoAtual(im);
+    return s + vm - saldo;
+  }, 0);
+}
+
+function calcEndividamentoTotal() {
+  const totalVM = state.imoveis.reduce((s, im) => s + (im.valorMercado || im.precoAquisicao || 0), 0);
+  const totalDivida = state.imoveis.reduce((s, im) => s + calcSaldoAtual(im), 0);
+  return totalVM > 0 ? (totalDivida / totalVM) * 100 : 0;
+}
+
+// ─── ROUTING ─────────────────────────────────────────────────────────────────
+function showPage(page) {
+  state.currentPage = page;
+  document.querySelectorAll('.nav-item').forEach(el => el.classList.remove('active'));
+  const pages = ['dashboard','imoveis','financiamento','fluxo','analise','config'];
+  const idx = pages.indexOf(page);
+  document.querySelectorAll('.nav-item')[idx]?.classList.add('active');
+
+  const titles = {
+    dashboard: 'Painel geral',
+    imoveis: 'Imóveis cadastrados',
+    financiamento: 'Financiamentos',
+    fluxo: 'Fluxo de caixa',
+    analise: 'Análise de viabilidade',
+    config: 'Configurações'
+  };
+  document.getElementById('page-title').textContent = titles[page] || '';
+  const renders = { dashboard: renderDashboard, imoveis: renderImoveis, financiamento: renderFinanciamento, fluxo: renderFluxo, analise: renderAnalise, config: renderConfig };
+  (renders[page] || (() => {}))();
+}
+
+// ─── DASHBOARD ───────────────────────────────────────────────────────────────
+function renderDashboard() {
+  const actions = document.getElementById('topbar-actions');
+  actions.innerHTML = `<button class="btn btn-primary btn-sm" onclick="showPage('imoveis')">+ Novo imóvel</button>`;
+
+  const totalVM = state.imoveis.reduce((s, im) => s + (im.valorMercado || im.precoAquisicao || 0), 0);
+  const totalDivida = state.imoveis.reduce((s, im) => s + calcSaldoAtual(im), 0);
+  const pl = totalVM - totalDivida;
+  const endiv = totalVM > 0 ? (totalDivida / totalVM) * 100 : 0;
+
+  const mesAtual = new Date().toISOString().slice(0, 7);
+  const saidasMes = (state.lancamentos || [])
+    .filter(l => l.mes === mesAtual && l.tipo === 'saida')
+    .reduce((s, l) => s + l.valor, 0);
+  const entradasMes = (state.lancamentos || [])
+    .filter(l => l.mes === mesAtual && l.tipo === 'entrada')
+    .reduce((s, l) => s + l.valor, 0);
+
+  let endivColor = 'color-success';
+  let endivLabel = 'Baixo';
+  if (endiv > 70) { endivColor = 'color-danger'; endivLabel = 'Alto'; }
+  else if (endiv > 40) { endivColor = 'color-warn'; endivLabel = 'Moderado'; }
+
+  const c = document.getElementById('content');
+  c.innerHTML = `
+    <div class="metrics-grid">
+      <div class="metric-card">
+        <div class="metric-label">Valor de mercado total</div>
+        <div class="metric-value">${fmtBRL(totalVM)}</div>
+        <div class="metric-sub">${state.imoveis.length} imóve${state.imoveis.length === 1 ? 'l' : 'is'}</div>
+      </div>
+      <div class="metric-card">
+        <div class="metric-label">Saldo devedor total</div>
+        <div class="metric-value metric-neg">${fmtBRL(totalDivida)}</div>
+        <div class="metric-sub">financiamentos ativos</div>
+      </div>
+      <div class="metric-card">
+        <div class="metric-label">Patrimônio líquido</div>
+        <div class="metric-value metric-pos">${fmtBRL(pl)}</div>
+        <div class="metric-sub">${fmtPct(totalVM > 0 ? (pl/totalVM)*100 : 0)} do total</div>
+      </div>
+      <div class="metric-card">
+        <div class="metric-label">Nível de endividamento</div>
+        <div class="metric-value ${endivColor}">${fmtPct(endiv)}</div>
+        <div class="metric-sub ${endivColor}">${endivLabel}</div>
+      </div>
+    </div>
+
+    <div class="metrics-grid">
+      <div class="metric-card">
+        <div class="metric-label">Saídas este mês</div>
+        <div class="metric-value metric-neg">${fmtBRL(saidasMes)}</div>
+        <div class="metric-sub">parcelas + despesas</div>
+      </div>
+      <div class="metric-card">
+        <div class="metric-label">Entradas este mês</div>
+        <div class="metric-value metric-pos">${fmtBRL(entradasMes)}</div>
+        <div class="metric-sub">aluguéis e receitas</div>
+      </div>
+      <div class="metric-card">
+        <div class="metric-label">Saldo do mês</div>
+        <div class="metric-value ${entradasMes - saidasMes >= 0 ? 'metric-pos' : 'metric-neg'}">${fmtBRL(entradasMes - saidasMes)}</div>
+        <div class="metric-sub">resultado mensal</div>
+      </div>
+      <div class="metric-card">
+        <div class="metric-label">Custo acumulado total</div>
+        <div class="metric-value">${fmtBRL(state.imoveis.reduce((s, im) => s + calcCustoTotalAcumulado(im), 0))}</div>
+        <div class="metric-sub">aquisição + parcelas + despesas</div>
+      </div>
+    </div>
+
+    ${state.imoveis.length === 0 ? `
+      <div class="card"><div class="empty">
+        <div class="empty-icon">🏠</div>
+        <h3>Nenhum imóvel cadastrado</h3>
+        <p>Cadastre o primeiro imóvel para começar a visualizar o patrimônio.</p>
+        <button class="btn btn-primary" onclick="showPage('imoveis')">Cadastrar imóvel</button>
+      </div></div>
+    ` : `
+      <div class="two-col">
+        <div class="card">
+          <div class="card-header"><span class="card-title">Endividamento por imóvel</span></div>
+          ${state.imoveis.map(im => {
+            const vm = im.valorMercado || im.precoAquisicao || 1;
+            const sd = calcSaldoAtual(im);
+            const pct = Math.min((sd / vm) * 100, 100);
+            const cls = pct > 70 ? 'bar-danger' : pct > 40 ? 'bar-warn' : 'bar-ok';
+            const tcls = pct > 70 ? 'color-danger' : pct > 40 ? 'color-warn' : 'color-success';
+            return `<div class="chart-bar-row">
+              <span class="chart-bar-label" title="${im.nome}">${im.nome}</span>
+              <div class="chart-bar-track"><div class="chart-bar-fill ${cls}" style="width:${pct}%"></div></div>
+              <span class="chart-bar-value ${tcls}">${fmtPct(pct, 0)}</span>
+            </div>`;
+          }).join('')}
+        </div>
+        <div class="card">
+          <div class="card-header"><span class="card-title">Valorização mínima p/ lucro (5 anos)</span></div>
+          ${state.imoveis.map(im => {
+            const val = calcValorizacaoMinima(im, 5);
+            const cls = val === null ? '' : val > 12 ? 'color-danger' : val > 8 ? 'color-warn' : 'color-success';
+            return `<div style="display:flex;justify-content:space-between;align-items:center;padding:10px 0;border-bottom:1px solid var(--border);">
+              <span class="color-muted" style="font-size:13px">${im.nome}</span>
+              <span class="fw-600 ${cls}" style="font-size:13px;font-family:var(--mono)">${val === null ? 'Quitado' : '+' + fmtPct(val)}/a.a.'}</span>
+            </div>`;
+          }).join('')}
+        </div>
+      </div>
+
+      <div class="card mt-16">
+        <div class="card-header"><span class="card-title">Resumo dos imóveis</span></div>
+        <div class="table-wrap">
+          <table>
+            <thead><tr>
+              <th>Empreendimento</th>
+              <th class="td-right">Vl. mercado</th>
+              <th class="td-right">Saldo devedor</th>
+              <th class="td-right">Parcela/mês</th>
+              <th class="td-right">Juros</th>
+              <th>Status</th>
+            </tr></thead>
+            <tbody>
+              ${state.imoveis.map(im => {
+                const sd = calcSaldoAtual(im);
+                const amort = gerarAmortizacao(im);
+                const parcela = amort[0]?.parcela || 0;
+                const taxa = im.financiamento?.taxaJurosAnual || 0;
+                const tag = sd === 0 ? '<span class="tag tag-ok">Quitado</span>'
+                  : taxa > 10 ? '<span class="tag tag-danger">Alto custo</span>'
+                  : '<span class="tag tag-warn">Financiado</span>';
+                return `<tr style="cursor:pointer" onclick="showPage('imoveis')">
+                  <td><div style="font-weight:500">${im.nome}</div><div style="font-size:11px;color:var(--text3)">${im.tipo || ''} · Adq. ${fmtDate(im.dataAquisicao)}</div></td>
+                  <td class="td-right td-mono">${fmtBRL(im.valorMercado || im.precoAquisicao)}</td>
+                  <td class="td-right td-mono ${sd > 0 ? 'color-danger' : 'color-success'}">${sd > 0 ? fmtBRL(sd) : '—'}</td>
+                  <td class="td-right td-mono">${parcela > 0 ? fmtBRL(parcela) : '—'}</td>
+                  <td class="td-right td-mono">${taxa > 0 ? fmtPct(taxa) + ' a.a.' : '—'}</td>
+                  <td>${tag}</td>
+                </tr>`;
+              }).join('')}
+            </tbody>
+          </table>
+        </div>
+      </div>
+    `}
+  `;
+}
+
+// ─── IMÓVEIS ─────────────────────────────────────────────────────────────────
+function renderImoveis() {
+  const actions = document.getElementById('topbar-actions');
+  actions.innerHTML = `<button class="btn btn-primary btn-sm" onclick="openModalImovel()">+ Cadastrar imóvel</button>`;
+
+  const c = document.getElementById('content');
+  if (state.imoveis.length === 0) {
+    c.innerHTML = `<div class="card"><div class="empty">
+      <div class="empty-icon">🏠</div>
+      <h3>Nenhum imóvel cadastrado ainda</h3>
+      <p>Clique em "Cadastrar imóvel" para começar.</p>
+      <button class="btn btn-primary" onclick="openModalImovel()">+ Cadastrar imóvel</button>
+    </div></div>`;
+    return;
+  }
+
+  c.innerHTML = `
+    <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(300px,1fr));gap:16px">
+      ${state.imoveis.map(im => renderCardImovel(im)).join('')}
+    </div>`;
+}
+
+function renderCardImovel(im) {
+  const sd = calcSaldoAtual(im);
+  const vm = im.valorMercado || im.precoAquisicao || 0;
+  const pl = vm - sd;
+  const pctDivida = vm > 0 ? (sd / vm) * 100 : 0;
+  const amort = gerarAmortizacao(im);
+  const parcela = amort[0]?.parcela || 0;
+  const custo = calcCustoTotalAcumulado(im);
+  const val5 = calcValorizacaoMinima(im, 5);
+
+  return `<div class="card" style="display:flex;flex-direction:column;gap:14px">
+    <div style="display:flex;justify-content:space-between;align-items:flex-start">
+      <div>
+        <div style="font-size:15px;font-weight:600;color:var(--text)">${im.nome}</div>
+        <div style="font-size:12px;color:var(--text3);margin-top:2px">${im.tipo || 'Não informado'} · ${im.empreendimento || ''}</div>
+      </div>
+      <div style="display:flex;gap:6px">
+        <button class="btn btn-ghost btn-sm" onclick="openModalImovel('${im.id}')">Editar</button>
+        <button class="btn btn-danger btn-sm" onclick="deletarImovel('${im.id}')">Excluir</button>
+      </div>
+    </div>
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px">
+      <div><div class="metric-label">Valor de mercado</div><div style="font-size:15px;font-weight:600">${fmtBRL(vm)}</div></div>
+      <div><div class="metric-label">Saldo devedor</div><div style="font-size:15px;font-weight:600;color:${sd > 0 ? 'var(--danger)' : 'var(--success)'}">${sd > 0 ? fmtBRL(sd) : 'Quitado'}</div></div>
+      <div><div class="metric-label">Patrimônio líquido</div><div style="font-size:15px;font-weight:600;color:var(--success)">${fmtBRL(pl)}</div></div>
+      <div><div class="metric-label">Parcela mensal</div><div style="font-size:15px;font-weight:600">${parcela > 0 ? fmtBRL(parcela) : '—'}</div></div>
+    </div>
+    ${pctDivida > 0 ? `
+    <div>
+      <div style="display:flex;justify-content:space-between;font-size:11px;color:var(--text3);margin-bottom:4px">
+        <span>Endividamento</span><span>${fmtPct(pctDivida)}</span>
+      </div>
+      <div class="bar-wrap"><div class="bar-fill ${pctDivida > 70 ? 'bar-danger' : pctDivida > 40 ? 'bar-warn' : 'bar-ok'}" style="width:${pctDivida}%"></div></div>
+    </div>` : ''}
+    <div style="display:flex;justify-content:space-between;font-size:12px;padding-top:8px;border-top:1px solid var(--border)">
+      <span class="color-muted">Custo acumulado: <strong>${fmtBRL(custo)}</strong></span>
+      <span class="color-muted">Val. mín. (5a): <strong class="${val5 && val5 > 12 ? 'color-danger' : val5 && val5 > 8 ? 'color-warn' : 'color-success'}">${val5 !== null ? '+' + fmtPct(val5) + '/a.a.' : 'Quitado'}</strong></span>
+    </div>
+    <button class="btn btn-ghost btn-sm" style="width:100%;justify-content:center" onclick="showPage('financiamento');filterImovel='${im.id}'">Ver financiamento →</button>
+  </div>`;
+}
+
+function openModalImovel(id) {
+  const im = id ? state.imoveis.find(i => i.id === id) : null;
+  document.getElementById('modal-title').textContent = im ? 'Editar imóvel' : 'Cadastrar imóvel';
+  document.getElementById('modal-body').innerHTML = `
+    <div class="form-grid">
+      <div class="form-group form-full">
+        <label>Nome do imóvel / unidade</label>
+        <input id="f-nome" placeholder="Ex: Apt 304 — Ed. Reserva" value="${im?.nome || ''}">
+      </div>
+      <div class="form-group">
+        <label>Empreendimento / prédio</label>
+        <input id="f-empreendimento" placeholder="Ex: Ed. Reserva Verde" value="${im?.empreendimento || ''}">
+      </div>
+      <div class="form-group">
+        <label>Tipo</label>
+        <select id="f-tipo">
+          <option value="Apartamento" ${im?.tipo === 'Apartamento' ? 'selected' : ''}>Apartamento</option>
+          <option value="Casa" ${im?.tipo === 'Casa' ? 'selected' : ''}>Casa</option>
+          <option value="Sala comercial" ${im?.tipo === 'Sala comercial' ? 'selected' : ''}>Sala comercial</option>
+          <option value="Studio" ${im?.tipo === 'Studio' ? 'selected' : ''}>Studio</option>
+          <option value="Terreno" ${im?.tipo === 'Terreno' ? 'selected' : ''}>Terreno</option>
+          <option value="Outro" ${im?.tipo === 'Outro' ? 'selected' : ''}>Outro</option>
+        </select>
+      </div>
+      <div class="form-group">
+        <label>Data de aquisição</label>
+        <input type="month" id="f-data" value="${im?.dataAquisicao || ''}">
+      </div>
+      <div class="form-group">
+        <label>Preço de aquisição (R$)</label>
+        <input id="f-preco" placeholder="Ex: 450000" value="${im?.precoAquisicao || ''}">
+      </div>
+      <div class="form-group">
+        <label>Valor de mercado atual (R$)</label>
+        <input id="f-vm" placeholder="Ex: 520000" value="${im?.valorMercado || ''}">
+        <span class="form-hint">Atualize manualmente quando quiser</span>
+      </div>
+      <div class="form-group form-full">
+        <label>Observações</label>
+        <textarea id="f-obs" rows="2" placeholder="Localização, características, etc.">${im?.obs || ''}</textarea>
+      </div>
+    </div>
+    <div class="divider"></div>
+    <div class="section-title">Financiamento</div>
+    <div class="form-grid">
+      <div class="form-group">
+        <label>Tipo de financiamento</label>
+        <select id="f-fin-tipo" onchange="toggleFinanciamento()">
+          <option value="nenhum" ${!im?.financiamento ? 'selected' : ''}>Sem financiamento / quitado</option>
+          <option value="banco" ${im?.financiamento?.tipo === 'banco' ? 'selected' : ''}>Banco (ex: Caixa, Itaú)</option>
+          <option value="construtora" ${im?.financiamento?.tipo === 'construtora' ? 'selected' : ''}>Construtora / incorporadora</option>
+        </select>
+      </div>
+      <div class="form-group" id="f-credor-wrap">
+        <label>Credor</label>
+        <input id="f-credor" placeholder="Ex: Caixa Econômica Federal" value="${im?.financiamento?.credor || ''}">
+      </div>
+      <div class="form-group" id="f-entrada-wrap">
+        <label>Valor de entrada (R$)</label>
+        <input id="f-entrada" placeholder="Ex: 80000" value="${im?.financiamento?.entrada || ''}">
+      </div>
+      <div class="form-group" id="f-saldo-wrap">
+        <label>Saldo devedor atual (R$)</label>
+        <input id="f-saldo" placeholder="Ex: 370000" value="${im?.financiamento?.saldoDevedor || ''}">
+      </div>
+      <div class="form-group" id="f-taxa-wrap">
+        <label>Taxa de juros anual (%)</label>
+        <input id="f-taxa" placeholder="Ex: 8.5" value="${im?.financiamento?.taxaJurosAnual || ''}">
+      </div>
+      <div class="form-group" id="f-prazo-wrap">
+        <label>Prazo restante (meses)</label>
+        <input id="f-prazo" placeholder="Ex: 240" value="${im?.financiamento?.prazoMeses || ''}">
+      </div>
+      <div class="form-group" id="f-sistema-wrap">
+        <label>Sistema de amortização</label>
+        <select id="f-sistema">
+          <option value="SAC" ${im?.financiamento?.sistema === 'SAC' ? 'selected' : ''}>SAC (parcelas decrescentes)</option>
+          <option value="PRICE" ${im?.financiamento?.sistema === 'PRICE' ? 'selected' : ''}>PRICE (parcelas fixas)</option>
+        </select>
+      </div>
+      <div class="form-group" id="f-inicio-wrap">
+        <label>Data de início do financiamento</label>
+        <input type="month" id="f-inicio" value="${im?.financiamento?.dataInicio || ''}">
+      </div>
+    </div>
+  `;
+  document.getElementById('modal-footer').innerHTML = `
+    <button class="btn btn-secondary" onclick="closeModal()">Cancelar</button>
+    <button class="btn btn-primary" onclick="salvarImovel('${id || ''}')">Salvar imóvel</button>
+  `;
+  toggleFinanciamento();
+  openModal();
+}
+
+function toggleFinanciamento() {
+  const tipo = document.getElementById('f-fin-tipo')?.value;
+  const ids = ['f-credor-wrap','f-entrada-wrap','f-saldo-wrap','f-taxa-wrap','f-prazo-wrap','f-sistema-wrap','f-inicio-wrap'];
+  ids.forEach(id => {
+    const el = document.getElementById(id);
+    if (el) el.classList.toggle('hidden', tipo === 'nenhum');
+  });
+}
+
+function salvarImovel(id) {
+  const nome = document.getElementById('f-nome').value.trim();
+  if (!nome) { alert('Informe o nome do imóvel'); return; }
+  const finTipo = document.getElementById('f-fin-tipo').value;
+  const financiamento = finTipo === 'nenhum' ? null : {
+    tipo: finTipo,
+    credor: document.getElementById('f-credor').value,
+    entrada: parseFloat(document.getElementById('f-entrada').value) || 0,
+    saldoDevedor: parseFloat(document.getElementById('f-saldo').value) || 0,
+    taxaJurosAnual: parseFloat(document.getElementById('f-taxa').value) || 0,
+    taxaJurosMensal: (parseFloat(document.getElementById('f-taxa').value) || 0) / 12,
+    prazoMeses: parseInt(document.getElementById('f-prazo').value) || 0,
+    sistema: document.getElementById('f-sistema').value,
+    dataInicio: document.getElementById('f-inicio').value,
+  };
+  const obj = {
+    id: id || Date.now().toString(),
+    nome,
+    empreendimento: document.getElementById('f-empreendimento').value,
+    tipo: document.getElementById('f-tipo').value,
+    dataAquisicao: document.getElementById('f-data').value,
+    precoAquisicao: parseFloat(document.getElementById('f-preco').value) || 0,
+    valorMercado: parseFloat(document.getElementById('f-vm').value) || 0,
+    obs: document.getElementById('f-obs').value,
+    financiamento
+  };
+  if (id) {
+    const idx = state.imoveis.findIndex(i => i.id === id);
+    if (idx >= 0) state.imoveis[idx] = obj;
+  } else {
+    state.imoveis.push(obj);
+  }
+  save();
+  closeModal();
+  renderImoveis();
+}
+
+function deletarImovel(id) {
+  if (!confirm('Excluir este imóvel? Todos os lançamentos associados também serão removidos.')) return;
+  state.imoveis = state.imoveis.filter(i => i.id !== id);
+  state.lancamentos = state.lancamentos.filter(l => l.imovelId !== id);
+  save();
+  renderImoveis();
+}
+
+// ─── FINANCIAMENTO ────────────────────────────────────────────────────────────
+function renderFinanciamento() {
+  document.getElementById('topbar-actions').innerHTML = '';
+  const c = document.getElementById('content');
+  const financiados = state.imoveis.filter(im => im.financiamento);
+  if (financiados.length === 0) {
+    c.innerHTML = `<div class="card"><div class="empty"><div class="empty-icon">💳</div><h3>Nenhum imóvel financiado</h3><p>Cadastre um imóvel com financiamento para ver a amortização.</p><button class="btn btn-primary" onclick="showPage('imoveis')">Ir para imóveis</button></div></div>`;
+    return;
+  }
+
+  let html = '';
+  financiados.forEach(im => {
+    const fin = im.financiamento;
+    const taxaM = fin.taxaJurosMensal || fin.taxaJurosAnual / 12;
+    const amort = gerarAmortizacao(im);
+    const totalParcelas = amort.reduce((s, r) => s + r.parcela, 0);
+    const totalJuros = amort.reduce((s, r) => s + r.juros, 0);
+    const saldoHoje = calcSaldoAtual(im);
+    const primeiraParc = amort[0];
+
+    html += `<div class="card mb-16">
+      <div class="card-header">
+        <span class="card-title">${im.nome}</span>
+        <span class="tag tag-info">${fin.tipo === 'banco' ? fin.credor || 'Banco' : 'Construtora'} · ${fin.sistema}</span>
+      </div>
+      <div style="display:grid;grid-template-columns:repeat(4,1fr);gap:12px;margin-bottom:16px">
+        <div><div class="metric-label">Saldo devedor inicial</div><div class="fw-600 text-mono">${fmtBRL(fin.saldoDevedor)}</div></div>
+        <div><div class="metric-label">Saldo hoje (estimado)</div><div class="fw-600 text-mono color-danger">${fmtBRL(saldoHoje)}</div></div>
+        <div><div class="metric-label">Taxa de juros</div><div class="fw-600 text-mono">${fmtPct(fin.taxaJurosAnual)} a.a. / ${fmtPct(taxaM, 3)} a.m.</div></div>
+        <div><div class="metric-label">Prazo restante</div><div class="fw-600 text-mono">${fin.prazoMeses} meses</div></div>
+        <div><div class="metric-label">1ª parcela (${fin.sistema})</div><div class="fw-600 text-mono">${fmtBRL(primeiraParc?.parcela)}</div></div>
+        <div><div class="metric-label">Total de parcelas</div><div class="fw-600 text-mono">${fmtBRL(totalParcelas)}</div></div>
+        <div><div class="metric-label">Total de juros</div><div class="fw-600 text-mono color-danger">${fmtBRL(totalJuros)}</div></div>
+        <div><div class="metric-label">Custo efetivo total</div><div class="fw-600 text-mono">${fmtBRL(fin.entrada + totalParcelas)}</div></div>
+      </div>
+      <div class="section-title">Tabela de amortização (primeiros 24 meses)</div>
+      <div class="table-wrap">
+        <table>
+          <thead><tr><th>Mês</th><th class="td-right">Parcela</th><th class="td-right">Amortização</th><th class="td-right">Juros</th><th class="td-right">Saldo devedor</th></tr></thead>
+          <tbody>
+            ${amort.slice(0, 24).map(r => `<tr>
+              <td>${r.mes}</td>
+              <td class="td-right td-mono">${fmtBRL(r.parcela)}</td>
+              <td class="td-right td-mono color-success">${fmtBRL(r.amort)}</td>
+              <td class="td-right td-mono color-danger">${fmtBRL(r.juros)}</td>
+              <td class="td-right td-mono">${fmtBRL(r.saldo)}</td>
+            </tr>`).join('')}
+          </tbody>
+        </table>
+      </div>
+      ${amort.length > 24 ? `<div style="text-align:center;padding:12px;font-size:12px;color:var(--text3)">Exibindo 24 de ${amort.length} meses</div>` : ''}
+    </div>`;
+  });
+
+  c.innerHTML = html;
+}
+
+// ─── FLUXO DE CAIXA ───────────────────────────────────────────────────────────
+function renderFluxo() {
+  const mesAtual = new Date().toISOString().slice(0, 7);
+  document.getElementById('topbar-actions').innerHTML = `
+    <input type="month" id="mes-filtro" value="${mesAtual}" onchange="renderFluxo()" style="padding:6px 10px;border:1px solid var(--border2);border-radius:var(--radius-sm);font-size:13px;background:var(--surface)">
+    <button class="btn btn-primary btn-sm" onclick="openModalLancamento()">+ Lançamento</button>`;
+
+  const mes = document.getElementById('mes-filtro')?.value || mesAtual;
+  const lancMes = (state.lancamentos || []).filter(l => l.mes === mes);
+  const entradas = lancMes.filter(l => l.tipo === 'entrada');
+  const saidas = lancMes.filter(l => l.tipo === 'saida');
+  const totalEnt = entradas.reduce((s, l) => s + l.valor, 0);
+  const totalSai = saidas.reduce((s, l) => s + l.valor, 0);
+  const saldo = totalEnt - totalSai;
+
+  const c = document.getElementById('content');
+  c.innerHTML = `
+    <div class="metrics-grid">
+      <div class="metric-card"><div class="metric-label">Entradas</div><div class="metric-value metric-pos">${fmtBRL(totalEnt)}</div></div>
+      <div class="metric-card"><div class="metric-label">Saídas</div><div class="metric-value metric-neg">${fmtBRL(totalSai)}</div></div>
+      <div class="metric-card"><div class="metric-label">Saldo do mês</div><div class="metric-value ${saldo >= 0 ? 'metric-pos' : 'metric-neg'}">${fmtBRL(saldo)}</div></div>
+      <div class="metric-card"><div class="metric-label">Lançamentos</div><div class="metric-value">${lancMes.length}</div></div>
+    </div>
+    <div class="two-col">
+      <div class="card">
+        <div class="card-header"><span class="card-title">Entradas</span><button class="btn btn-ghost btn-sm" onclick="openModalLancamento('entrada')">+ Adicionar</button></div>
+        ${entradas.length === 0 ? `<div style="text-align:center;padding:30px;color:var(--text3);font-size:13px">Nenhuma entrada neste mês</div>` :
+          `<table><thead><tr><th>Descrição</th><th>Imóvel</th><th class="td-right">Valor</th><th></th></tr></thead><tbody>
+          ${entradas.map(l => `<tr>
+            <td>${l.descricao}</td>
+            <td><span style="font-size:11px;color:var(--text3)">${state.imoveis.find(i => i.id === l.imovelId)?.nome || '—'}</span></td>
+            <td class="td-right td-mono color-success">${fmtBRL(l.valor)}</td>
+            <td><button class="btn btn-ghost btn-sm" onclick="deletarLancamento('${l.id}')">✕</button></td>
+          </tr>`).join('')}
+          </tbody></table>`}
+      </div>
+      <div class="card">
+        <div class="card-header"><span class="card-title">Saídas</span><button class="btn btn-ghost btn-sm" onclick="openModalLancamento('saida')">+ Adicionar</button></div>
+        ${saidas.length === 0 ? `<div style="text-align:center;padding:30px;color:var(--text3);font-size:13px">Nenhuma saída neste mês</div>` :
+          `<table><thead><tr><th>Descrição</th><th>Imóvel</th><th class="td-right">Valor</th><th></th></tr></thead><tbody>
+          ${saidas.map(l => `<tr>
+            <td>${l.descricao}</td>
+            <td><span style="font-size:11px;color:var(--text3)">${state.imoveis.find(i => i.id === l.imovelId)?.nome || '—'}</span></td>
+            <td class="td-right td-mono color-danger">${fmtBRL(l.valor)}</td>
+            <td><button class="btn btn-ghost btn-sm" onclick="deletarLancamento('${l.id}')">✕</button></td>
+          </tr>`).join('')}
+          </tbody></table>`}
+      </div>
+    </div>`;
+}
+
+function openModalLancamento(tipoDefault) {
+  const mes = document.getElementById('mes-filtro')?.value || new Date().toISOString().slice(0, 7);
+  document.getElementById('modal-title').textContent = 'Novo lançamento';
+  document.getElementById('modal-body').innerHTML = `
+    <div class="form-grid">
+      <div class="form-group">
+        <label>Tipo</label>
+        <select id="l-tipo">
+          <option value="saida" ${tipoDefault === 'saida' ? 'selected' : ''}>Saída (despesa / parcela)</option>
+          <option value="entrada" ${tipoDefault === 'entrada' ? 'selected' : ''}>Entrada (aluguel / receita)</option>
+        </select>
+      </div>
+      <div class="form-group">
+        <label>Mês de referência</label>
+        <input type="month" id="l-mes" value="${mes}">
+      </div>
+      <div class="form-group form-full">
+        <label>Descrição</label>
+        <input id="l-desc" placeholder="Ex: Parcela mensal, Condomínio, IPTU...">
+      </div>
+      <div class="form-group">
+        <label>Valor (R$)</label>
+        <input id="l-valor" placeholder="Ex: 4200">
+      </div>
+      <div class="form-group">
+        <label>Imóvel relacionado</label>
+        <select id="l-imovel">
+          <option value="">— Nenhum específico —</option>
+          ${state.imoveis.map(im => `<option value="${im.id}">${im.nome}</option>`).join('')}
+        </select>
+      </div>
+    </div>`;
+  document.getElementById('modal-footer').innerHTML = `
+    <button class="btn btn-secondary" onclick="closeModal()">Cancelar</button>
+    <button class="btn btn-primary" onclick="salvarLancamento()">Salvar lançamento</button>`;
+  openModal();
+}
+
+function salvarLancamento() {
+  const desc = document.getElementById('l-desc').value.trim();
+  const valor = parseFloat(document.getElementById('l-valor').value);
+  if (!desc || !valor) { alert('Preencha descrição e valor'); return; }
+  state.lancamentos = state.lancamentos || [];
+  state.lancamentos.push({
+    id: Date.now().toString(),
+    tipo: document.getElementById('l-tipo').value,
+    mes: document.getElementById('l-mes').value,
+    descricao: desc,
+    valor,
+    imovelId: document.getElementById('l-imovel').value
+  });
+  save();
+  closeModal();
+  renderFluxo();
+}
+
+function deletarLancamento(id) {
+  state.lancamentos = state.lancamentos.filter(l => l.id !== id);
+  save();
+  renderFluxo();
+}
+
+// ─── ANÁLISE ──────────────────────────────────────────────────────────────────
+function renderAnalise() {
+  document.getElementById('topbar-actions').innerHTML = '';
+  const c = document.getElementById('content');
+
+  if (state.imoveis.length === 0) {
+    c.innerHTML = `<div class="card"><div class="empty"><div class="empty-icon">📊</div><h3>Sem imóveis para analisar</h3><button class="btn btn-primary" onclick="showPage('imoveis')">Cadastrar imóvel</button></div></div>`;
+    return;
+  }
+
+  let html = `<div class="alert alert-info">Selecione um imóvel e o horizonte de tempo para ver a análise de viabilidade da venda.</div>
+  <div class="card mb-16">
+    <div class="form-grid form-grid-3">
+      <div class="form-group">
+        <label>Imóvel</label>
+        <select id="an-imovel" onchange="calcularAnalise()">
+          ${state.imoveis.map(im => `<option value="${im.id}">${im.nome}</option>`).join('')}
+        </select>
+      </div>
+      <div class="form-group">
+        <label>Vender em (anos)</label>
+        <select id="an-anos" onchange="calcularAnalise()">
+          ${[1,2,3,5,7,10,15,20].map(a => `<option value="${a}" ${a === 5 ? 'selected' : ''}>${a} ano${a > 1 ? 's' : ''}</option>`).join('')}
+        </select>
+      </div>
+      <div class="form-group">
+        <label>Valorização anual estimada (%)</label>
+        <input id="an-val" type="number" step="0.5" value="8" onchange="calcularAnalise()" placeholder="Ex: 8">
+      </div>
+    </div>
+  </div>
+  <div id="analise-resultado"></div>`;
+
+  c.innerHTML = html;
+  calcularAnalise();
+}
+
+function calcularAnalise() {
+  const imId = document.getElementById('an-imovel')?.value;
+  const anos = parseInt(document.getElementById('an-anos')?.value) || 5;
+  const valorAnual = parseFloat(document.getElementById('an-val')?.value) || 0;
+  const im = state.imoveis.find(i => i.id === imId);
+  if (!im) return;
+
+  const vm = im.valorMercado || im.precoAquisicao || 0;
+  const valorFuturo = vm * Math.pow(1 + valorAnual / 100, anos);
+  const dataVenda = new Date();
+  dataVenda.setFullYear(dataVenda.getFullYear() + anos);
+
+  const { totalJuros, totalParcelas } = calcTotalJurosPagos(im, dataVenda.toISOString());
+  const amort = gerarAmortizacao(im);
+  const mesIdx = Math.min(anos * 12, amort.length) - 1;
+  const saldoNaVenda = mesIdx >= 0 ? Math.max(0, amort[mesIdx]?.saldo || 0) : 0;
+
+  const aqs = im.precoAquisicao || 0;
+  const entrada = im.financiamento?.entrada || 0;
+  const despesas = (state.lancamentos || [])
+    .filter(l => l.imovelId === im.id && l.tipo === 'saida')
+    .reduce((s, l) => s + l.valor, 0);
+
+  const custoTotal = aqs + totalParcelas + despesas;
+  const receitaLiquida = valorFuturo - saldoNaVenda;
+  const lucro = receitaLiquida - custoTotal;
+  const roi = custoTotal > 0 ? (lucro / custoTotal) * 100 : 0;
+  const roiAnual = Math.pow(1 + roi / 100, 1 / anos) - 1;
+
+  const valMin = calcValorizacaoMinima(im, anos);
+
+  const res = document.getElementById('analise-resultado');
+  if (!res) return;
+  res.innerHTML = `
+    <div class="two-col">
+      <div class="card">
+        <div class="card-title" style="margin-bottom:16px">Projeção de venda em ${anos} ano${anos > 1 ? 's' : ''}</div>
+        <div style="display:flex;flex-direction:column;gap:12px">
+          <div style="display:flex;justify-content:space-between;padding:10px 0;border-bottom:1px solid var(--border)">
+            <span class="color-muted">Valor atual de mercado</span><span class="fw-600 text-mono">${fmtBRL(vm)}</span>
+          </div>
+          <div style="display:flex;justify-content:space-between;padding:10px 0;border-bottom:1px solid var(--border)">
+            <span class="color-muted">Valor futuro estimado (${valorAnual}%/a.a.)</span><span class="fw-600 text-mono">${fmtBRL(valorFuturo)}</span>
+          </div>
+          <div style="display:flex;justify-content:space-between;padding:10px 0;border-bottom:1px solid var(--border)">
+            <span class="color-muted">(-) Saldo devedor na venda</span><span class="fw-600 text-mono color-danger">- ${fmtBRL(saldoNaVenda)}</span>
+          </div>
+          <div style="display:flex;justify-content:space-between;padding:10px 0;border-bottom:1px solid var(--border)">
+            <span class="color-muted">Receita líquida da venda</span><span class="fw-600 text-mono">${fmtBRL(receitaLiquida)}</span>
+          </div>
+          <div style="display:flex;justify-content:space-between;padding:10px 0;border-bottom:1px solid var(--border)">
+            <span class="color-muted">(-) Custo total acumulado</span><span class="fw-600 text-mono color-danger">- ${fmtBRL(custoTotal)}</span>
+          </div>
+          <div style="display:flex;justify-content:space-between;padding:12px;background:${lucro >= 0 ? 'var(--success-light)' : 'var(--danger-light)'};border-radius:var(--radius-sm)">
+            <span style="font-weight:600;color:${lucro >= 0 ? 'var(--success)' : 'var(--danger)'}">Lucro / Prejuízo</span>
+            <span style="font-weight:700;font-family:var(--mono);font-size:16px;color:${lucro >= 0 ? 'var(--success)' : 'var(--danger)'}">${fmtBRL(lucro)}</span>
+          </div>
+        </div>
+      </div>
+      <div class="card">
+        <div class="card-title" style="margin-bottom:16px">Indicadores do investimento</div>
+        <div style="display:flex;flex-direction:column;gap:14px">
+          <div>
+            <div class="metric-label">ROI total no período</div>
+            <div class="metric-value ${roi >= 0 ? 'metric-pos' : 'metric-neg'}">${fmtPct(roi)}</div>
+          </div>
+          <div>
+            <div class="metric-label">ROI anualizado</div>
+            <div class="metric-value ${roiAnual >= 0 ? 'metric-pos' : 'metric-neg'}">${fmtPct(roiAnual * 100)}/a.a.</div>
+          </div>
+          <div>
+            <div class="metric-label">Total de juros pagos</div>
+            <div class="metric-value metric-neg">${fmtBRL(totalJuros)}</div>
+          </div>
+          <div class="divider"></div>
+          <div>
+            <div class="metric-label">Valorização mínima para ponto de equilíbrio</div>
+            <div class="metric-value ${valMin && valMin > 12 ? 'metric-neg' : valMin && valMin > 8 ? 'metric-warn' : 'metric-pos'}">${valMin !== null ? '+' + fmtPct(valMin) + '/a.a.' : 'Quitado'}</div>
+            <div class="metric-sub">abaixo disso o investimento dá prejuízo</div>
+          </div>
+          <div class="${valorAnual >= (valMin || 0) ? 'alert alert-info' : 'alert alert-warn'}" style="margin-bottom:0">
+            ${valorAnual >= (valMin || 0)
+              ? `Com ${valorAnual}%/a.a. de valorização, o investimento é lucrativo.`
+              : `Com ${valorAnual}%/a.a., o imóvel não cobre o custo do financiamento. Precisa de pelo menos ${fmtPct(valMin || 0)}/a.a.`}
+          </div>
+        </div>
+      </div>
+    </div>`;
+}
+
+// ─── CONFIG ───────────────────────────────────────────────────────────────────
+function renderConfig() {
+  document.getElementById('topbar-actions').innerHTML = '';
+  const c = document.getElementById('content');
+  c.innerHTML = `
+    <div style="max-width:560px">
+      <div class="card mb-16">
+        <div class="card-title" style="margin-bottom:16px">Sincronização com GitHub Gist</div>
+        <div class="alert alert-info">Os dados são salvos no seu navegador automaticamente. Configure o Gist para acessar de qualquer computador.</div>
+        <div class="form-grid" style="margin-top:16px">
+          <div class="form-group form-full">
+            <label>Personal Access Token do GitHub</label>
+            <input id="cfg-token" type="password" placeholder="ghp_xxxxxxxxxxxxxxxxxxxx" value="${state.gistToken || ''}">
+            <span class="form-hint">Gere em: GitHub → Settings → Developer settings → Personal access tokens → New token (scope: gist)</span>
+          </div>
+          <div class="form-group form-full">
+            <label>ID do Gist <span style="color:var(--text3)">(deixe em branco para criar um novo)</span></label>
+            <input id="cfg-gist" placeholder="Será preenchido automaticamente" value="${state.gistId || ''}">
+          </div>
+        </div>
+        <div style="display:flex;gap:8px;margin-top:16px">
+          <button class="btn btn-primary" onclick="salvarConfig()">Conectar e sincronizar</button>
+          ${state.gistId ? `<button class="btn btn-secondary" onclick="carregarGist()">Carregar dados do Gist</button>` : ''}
+        </div>
+        <div id="cfg-msg" style="margin-top:12px;font-size:13px"></div>
+      </div>
+
+      <div class="card mb-16">
+        <div class="card-title" style="margin-bottom:16px">Dados locais</div>
+        <div style="font-size:13px;color:var(--text2);margin-bottom:12px">
+          ${state.imoveis.length} imóve${state.imoveis.length !== 1 ? 'is' : 'l'} · ${(state.lancamentos || []).length} lançamentos salvos localmente
+        </div>
+        <div style="display:flex;gap:8px">
+          <button class="btn btn-secondary btn-sm" onclick="exportarJSON()">Exportar JSON</button>
+          <button class="btn btn-danger btn-sm" onclick="limparDados()">Limpar todos os dados</button>
+        </div>
+      </div>
+    </div>`;
+}
+
+async function salvarConfig() {
+  const token = document.getElementById('cfg-token').value.trim();
+  const gistId = document.getElementById('cfg-gist').value.trim();
+  const msg = document.getElementById('cfg-msg');
+  if (!token) { msg.textContent = 'Informe o token.'; msg.style.color = 'var(--danger)'; return; }
+
+  msg.textContent = 'Conectando...'; msg.style.color = 'var(--text2)';
+  try {
+    let id = gistId;
+    if (!id) {
+      id = await createGist(token);
+      msg.textContent = `Gist criado! ID: ${id}`;
+    }
+    state.gistToken = token;
+    state.gistId = id;
+    saveLocal();
+    await saveGist();
+    msg.textContent = '✓ Conectado e sincronizado com sucesso!';
+    msg.style.color = 'var(--success)';
+    updateGistStatus();
+    renderConfig();
+  } catch(e) {
+    msg.textContent = 'Erro: ' + e.message;
+    msg.style.color = 'var(--danger)';
+  }
+}
+
+async function carregarGist() {
+  const msg = document.getElementById('cfg-msg');
+  msg.textContent = 'Carregando...'; msg.style.color = 'var(--text2)';
+  const ok = await loadGist();
+  if (ok) { msg.textContent = '✓ Dados carregados!'; msg.style.color = 'var(--success)'; renderConfig(); }
+  else { msg.textContent = 'Erro ao carregar. Verifique o token e o ID.'; msg.style.color = 'var(--danger)'; }
+}
+
+function exportarJSON() {
+  const data = JSON.stringify({ imoveis: state.imoveis, lancamentos: state.lancamentos }, null, 2);
+  const a = document.createElement('a');
+  a.href = 'data:application/json,' + encodeURIComponent(data);
+  a.download = 'patrimonio_imoveis.json';
+  a.click();
+}
+
+function limparDados() {
+  if (!confirm('Limpar TODOS os dados? Esta ação não pode ser desfeita.')) return;
+  state.imoveis = []; state.lancamentos = [];
+  save(); renderConfig();
+}
+
+// ─── MODAL ────────────────────────────────────────────────────────────────────
+function openModal() { document.getElementById('modal-overlay').classList.remove('hidden'); }
+function closeModal() { document.getElementById('modal-overlay').classList.add('hidden'); }
+function closeModalOnOverlay(e) { if (e.target === document.getElementById('modal-overlay')) closeModal(); }
+
+// ─── INIT ─────────────────────────────────────────────────────────────────────
+loadLocal();
+updateGistStatus();
+showPage('dashboard');
+</script>
+</body>
+</html>
