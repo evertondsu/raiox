@@ -388,7 +388,7 @@ function gerarAmortizacao(imovel) {
 function calcTotalJurosPagos(imovel, ateData) {
   const rows = gerarAmortizacao(imovel);
   const inicio = new Date(imovel.financiamento?.dataInicio || imovel.dataAquisicao);
-  const ate = new Date(ateData || new Date());
+  const ate = new Date(ateData || getHoje());
   let totalJuros = 0;
   let totalParcelas = 0;
   rows.forEach((r, i) => {
@@ -404,8 +404,8 @@ function calcTotalJurosPagos(imovel, ateData) {
 
 function calcSaldoAtual(imovel) {
   const rows = gerarAmortizacao(imovel);
-  const inicio = new Date((imovel.financiamento?.dataInicio || imovel.dataAquisicao || new Date().toISOString().slice(0,7)) + '-02');
-  const hoje = new Date();
+  const inicio = new Date((imovel.financiamento?.dataInicio || imovel.dataAquisicao || getMesAtual()) + '-02');
+  const hoje = getHoje();
   const pagas = imovel.parcelasMensaisPagas || {};
   let saldo = imovel.financiamento?.saldoDevedor || 0;
   rows.forEach((r, i) => {
@@ -425,7 +425,7 @@ function calcSaldoAtual(imovel) {
 // Retorna parcelas mensais para o fluxo de caixa (pagas e projetadas)
 function getParcelasMensaisFluxo(imovel) {
   const rows = gerarAmortizacao(imovel);
-  const inicio = new Date((imovel.financiamento?.dataInicio || imovel.dataAquisicao || new Date().toISOString().slice(0,7)) + '-02');
+  const inicio = new Date((imovel.financiamento?.dataInicio || imovel.dataAquisicao || getMesAtual()) + '-02');
   const pagas = imovel.parcelasMensaisPagas || {};
   return rows.map((r, i) => {
     const d = new Date(inicio);
@@ -509,7 +509,7 @@ function renderDashboard() {
   const pl = totalVM - totalDivida;
   const endiv = totalVM > 0 ? (totalDivida / totalVM) * 100 : 0;
 
-  const mesAtual = new Date().toISOString().slice(0, 7);
+  const mesAtual = getMesAtual();
   const saidasMes = (state.lancamentos || [])
     .filter(l => l.mes === mesAtual && l.tipo === 'saida')
     .reduce((s, l) => s + l.valor, 0);
@@ -859,7 +859,7 @@ function deletarImovel(id) {
 
 function calcSaldoAposNMeses(imovel, n) {
   const rows = gerarAmortizacao(imovel);
-  const inicio = new Date((imovel.financiamento?.dataInicio || imovel.dataAquisicao || new Date().toISOString().slice(0,7)) + '-02');
+  const inicio = new Date((imovel.financiamento?.dataInicio || imovel.dataAquisicao || getMesAtual()) + '-02');
   const pagas = imovel.parcelasMensaisPagas || {};
   let saldo = imovel.financiamento?.saldoDevedor || 0;
   for (let i = 0; i < Math.min(n, rows.length); i++) {
@@ -888,7 +888,7 @@ function openModalMarcarPago(imovelId, mesKey, parcelaPrev, amortPrev, jurosPrev
       </div>
       <div class="form-group">
         <label>Data do pagamento</label>
-        <input type="date" id="mp-data" value="${new Date().toISOString().slice(0,10)}">
+        <input type="date" id="mp-data" value="${getHoje().toISOString().slice(0,10)}">
       </div>
       <div class="form-group">
         <label>Amortização real (R$)</label>
@@ -997,7 +997,7 @@ function renderFinanciamento() {
               <tbody>
                 ${especiais.map(p => {
                   const venc = new Date(p.data + '-02');
-                  const atrasado = !p.pago && venc < new Date();
+                  const atrasado = !p.pago && venc < getHoje();
                   const statusTag = p.pago
                     ? '<span class="tag tag-ok">Pago</span>'
                     : atrasado ? '<span class="tag tag-danger">Em atraso</span>'
@@ -1038,7 +1038,7 @@ function renderFinanciamento() {
           </tr></thead>
           <tbody>
             ${(() => {
-              const inicio = new Date((fin.dataInicio || im.dataAquisicao || new Date().toISOString().slice(0,7)) + '-02');
+              const inicio = new Date((fin.dataInicio || im.dataAquisicao || getMesAtual()) + '-02');
               const mesesComEspecial = {};
               especiais.forEach(p => { mesesComEspecial[p.data] = p; });
               const meses = ['Jan','Fev','Mar','Abr','Mai','Jun','Jul','Ago','Set','Out','Nov','Dez'];
@@ -1051,7 +1051,7 @@ function renderFinanciamento() {
                 const esp = mesesComEspecial[mesKey];
                 const pgto = pagas[mesKey];
                 const isPago = !!pgto;
-                const hoje = new Date();
+                const hoje = getHoje();
                 const isFuturo = d > hoje;
                 const totalMes = (pgto ? pgto.valorPago : r.parcela) + (esp ? esp.valor : 0);
                 const isEsp = !!esp;
@@ -1229,7 +1229,7 @@ function getSaidasFinanciamentoMes(mes) {
 }
 
 function renderFluxo() {
-  const mesAtual = new Date().toISOString().slice(0, 7);
+  const mesAtual = getMesAtual();
   document.getElementById('topbar-actions').innerHTML = `
     <input type="month" id="mes-filtro" value="${mesAtual}" onchange="renderFluxo()" style="padding:6px 10px;border:1px solid var(--border2);border-radius:var(--radius-sm);font-size:13px;background:var(--surface)">
     <button class="btn btn-primary btn-sm" onclick="openModalLancamento()">+ Lançamento manual</button>`;
@@ -1320,7 +1320,7 @@ function renderFluxo() {
 }
 
 function openModalLancamento(tipoDefault) {
-  const mes = document.getElementById('mes-filtro')?.value || new Date().toISOString().slice(0, 7);
+  const mes = document.getElementById('mes-filtro')?.value || getMesAtual();
   document.getElementById('modal-title').textContent = 'Novo lançamento';
   document.getElementById('modal-body').innerHTML = `
     <div class="form-grid">
@@ -1427,7 +1427,7 @@ function calcularAnalise() {
 
   const vm = im.valorMercado || im.precoAquisicao || 0;
   const valorFuturo = vm * Math.pow(1 + valorAnual / 100, anos);
-  const dataVenda = new Date();
+  const dataVenda = new Date(getHoje());
   dataVenda.setFullYear(dataVenda.getFullYear() + anos);
 
   const { totalJuros, totalParcelas } = calcTotalJurosPagos(im, dataVenda.toISOString());
@@ -1602,10 +1602,52 @@ function openModal() { document.getElementById('modal-overlay').classList.remove
 function closeModal() { document.getElementById('modal-overlay').classList.add('hidden'); }
 function closeModalOnOverlay(e) { if (e.target === document.getElementById('modal-overlay')) closeModal(); }
 
+// ─── DATA ATUAL (fonte externa) ───────────────────────────────────────────────
+// Sempre usa a hora de São Paulo via API, independente do PC ou fuso do navegador
+let hoje = new Date(); // fallback imediato
+
+function getHoje() { return hoje; }
+
+function getMesAtual() {
+  const d = getHoje();
+  return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}`;
+}
+
+async function fetchDataHoje() {
+  try {
+    const r = await fetch('https://worldtimeapi.org/api/timezone/America/Sao_Paulo');
+    if (!r.ok) throw new Error('API indisponível');
+    const data = await r.json();
+    hoje = new Date(data.datetime);
+    console.log('Data sincronizada via WorldTimeAPI:', hoje.toLocaleString('pt-BR'));
+  } catch(e) {
+    console.warn('WorldTimeAPI indisponível, usando relógio local:', e.message);
+    hoje = new Date(); // fallback para o relógio do navegador
+  }
+}
+
 // ─── INIT ─────────────────────────────────────────────────────────────────────
 loadLocal();
 updateGistStatus();
-showPage('dashboard');
+
+// Mostra um loading rápido enquanto busca a data, depois renderiza
+document.getElementById('content').innerHTML = `
+  <div style="display:flex;align-items:center;justify-content:center;height:200px;gap:12px;color:var(--text3)">
+    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="animation:spin 1s linear infinite">
+      <path d="M21 12a9 9 0 11-6.219-8.56"/>
+    </svg>
+    <span style="font-size:13px">Sincronizando data e hora com servidor...</span>
+  </div>
+  <style>@keyframes spin{to{transform:rotate(360deg)}}</style>`;
+
+fetchDataHoje().then(() => {
+  // Após ter a data correta, carrega dados do Gist (se configurado) e renderiza
+  if (state.gistToken && state.gistId) {
+    loadGist().then(() => showPage('dashboard'));
+  } else {
+    showPage('dashboard');
+  }
+});
 </script>
 </body>
 </html>
