@@ -404,15 +404,46 @@ function calcTotalJurosPagos(imovel, ateData) {
 
 function calcSaldoAtual(imovel) {
   const rows = gerarAmortizacao(imovel);
-  const inicio = new Date(imovel.financiamento?.dataInicio || imovel.dataAquisicao);
+  const inicio = new Date((imovel.financiamento?.dataInicio || imovel.dataAquisicao || new Date().toISOString().slice(0,7)) + '-02');
   const hoje = new Date();
+  const pagas = imovel.parcelasMensaisPagas || {};
   let saldo = imovel.financiamento?.saldoDevedor || 0;
   rows.forEach((r, i) => {
     const d = new Date(inicio);
     d.setMonth(d.getMonth() + i);
-    if (d <= hoje) saldo = Math.max(0, saldo - r.amort);
+    const mesKey = `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}`;
+    if (d <= hoje) {
+      // Se há registro de pagamento real, usa a amortização real; senão usa a projetada
+      const pago = pagas[mesKey];
+      const amortReal = pago ? (pago.amort ?? r.amort) : r.amort;
+      saldo = Math.max(0, saldo - amortReal);
+    }
   });
   return saldo;
+}
+
+// Retorna parcelas mensais para o fluxo de caixa (pagas e projetadas)
+function getParcelasMensaisFluxo(imovel) {
+  const rows = gerarAmortizacao(imovel);
+  const inicio = new Date((imovel.financiamento?.dataInicio || imovel.dataAquisicao || new Date().toISOString().slice(0,7)) + '-02');
+  const pagas = imovel.parcelasMensaisPagas || {};
+  return rows.map((r, i) => {
+    const d = new Date(inicio);
+    d.setMonth(d.getMonth() + i);
+    const mesKey = `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}`;
+    const pago = pagas[mesKey];
+    return {
+      mes: mesKey,
+      parcela: pago ? pago.valorPago : r.parcela,
+      amort: pago ? (pago.amort ?? r.amort) : r.amort,
+      juros: pago ? (pago.juros ?? r.juros) : r.juros,
+      saldo: r.saldo,
+      pago: !!pago,
+      projetado: !pago,
+      imovelId: imovel.id,
+      imovelNome: imovel.nome
+    };
+  });
 }
 
 function calcCustoTotalAcumulado(imovel) {
@@ -826,6 +857,87 @@ function deletarImovel(id) {
   renderImoveis();
 }
 
+function calcSaldoAposNMeses(imovel, n) {
+  const rows = gerarAmortizacao(imovel);
+  const inicio = new Date((imovel.financiamento?.dataInicio || imovel.dataAquisicao || new Date().toISOString().slice(0,7)) + '-02');
+  const pagas = imovel.parcelasMensaisPagas || {};
+  let saldo = imovel.financiamento?.saldoDevedor || 0;
+  for (let i = 0; i < Math.min(n, rows.length); i++) {
+    const d = new Date(inicio); d.setMonth(d.getMonth() + i);
+    const mesKey = `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}`;
+    const pg = pagas[mesKey];
+    saldo = Math.max(0, saldo - (pg ? (pg.amort ?? rows[i].amort) : rows[i].amort));
+  }
+  return saldo;
+}
+
+function openModalMarcarPago(imovelId, mesKey, parcelaPrev, amortPrev, jurosPrev) {
+  const [ano, mes] = mesKey.split('-');
+  const meses = ['Jan','Fev','Mar','Abr','Mai','Jun','Jul','Ago','Set','Out','Nov','Dez'];
+  const dataFmt = `${meses[parseInt(mes)-1]}/${ano}`;
+  document.getElementById('modal-title').textContent = `Registrar pagamento — ${dataFmt}`;
+  document.getElementById('modal-body').innerHTML = `
+    <div class="alert alert-info" style="margin-bottom:16px">
+      Confirme ou ajuste os valores reais pagos. Isso atualizará o saldo devedor e o fluxo de caixa automaticamente.
+    </div>
+    <div class="form-grid">
+      <div class="form-group">
+        <label>Valor total pago (R$)</label>
+        <input id="mp-valor" type="number" step="0.01" value="${parcelaPrev.toFixed(2)}">
+        <span class="form-hint">Valor projetado: ${fmtBRL(parcelaPrev)}</span>
+      </div>
+      <div class="form-group">
+        <label>Data do pagamento</label>
+        <input type="date" id="mp-data" value="${new Date().toISOString().slice(0,10)}">
+      </div>
+      <div class="form-group">
+        <label>Amortização real (R$)</label>
+        <input id="mp-amort" type="number" step="0.01" value="${amortPrev.toFixed(2)}">
+        <span class="form-hint">Projetado: ${fmtBRL(amortPrev)}</span>
+      </div>
+      <div class="form-group">
+        <label>Juros reais (R$)</label>
+        <input id="mp-juros" type="number" step="0.01" value="${jurosPrev.toFixed(2)}">
+        <span class="form-hint">Projetado: ${fmtBRL(jurosPrev)}</span>
+      </div>
+      <div class="form-group form-full">
+        <label>Observação (opcional)</label>
+        <input id="mp-obs" placeholder="Ex: Pago com desconto, valor corrigido pelo INCC...">
+      </div>
+    </div>
+  `;
+  document.getElementById('modal-footer').innerHTML = `
+    <button class="btn btn-secondary" onclick="closeModal()">Cancelar</button>
+    <button class="btn btn-primary" onclick="marcarParcelaPaga('${imovelId}','${mesKey}')">Confirmar pagamento</button>
+  `;
+  openModal();
+}
+
+function marcarParcelaPaga(imovelId, mesKey) {
+  const im = state.imoveis.find(i => i.id === imovelId);
+  if (!im) return;
+  if (!im.parcelasMensaisPagas) im.parcelasMensaisPagas = {};
+  im.parcelasMensaisPagas[mesKey] = {
+    valorPago: parseFloat(document.getElementById('mp-valor').value) || 0,
+    amort: parseFloat(document.getElementById('mp-amort').value) || 0,
+    juros: parseFloat(document.getElementById('mp-juros').value) || 0,
+    dataPagamento: document.getElementById('mp-data').value,
+    obs: document.getElementById('mp-obs').value
+  };
+  save();
+  closeModal();
+  renderFinanciamento();
+}
+
+function desmarcarParcela(imovelId, mesKey) {
+  if (!confirm('Desfazer o registro deste pagamento?')) return;
+  const im = state.imoveis.find(i => i.id === imovelId);
+  if (!im || !im.parcelasMensaisPagas) return;
+  delete im.parcelasMensaisPagas[mesKey];
+  save();
+  renderFinanciamento();
+}
+
 // ─── FINANCIAMENTO ────────────────────────────────────────────────────────────
 function renderFinanciamento() {
   document.getElementById('topbar-actions').innerHTML = '';
@@ -841,95 +953,368 @@ function renderFinanciamento() {
     const fin = im.financiamento;
     const taxaM = fin.taxaJurosMensal || fin.taxaJurosAnual / 12;
     const amort = gerarAmortizacao(im);
-    const totalParcelas = amort.reduce((s, r) => s + r.parcela, 0);
+    const totalMensais = amort.reduce((s, r) => s + r.parcela, 0);
     const totalJuros = amort.reduce((s, r) => s + r.juros, 0);
     const saldoHoje = calcSaldoAtual(im);
     const primeiraParc = amort[0];
+    const especiais = (im.parcelasEspeciais || []).sort((a, b) => a.data.localeCompare(b.data));
+    const totalEspeciais = especiais.reduce((s, p) => s + p.valor, 0);
+    const totalGeral = (fin.entrada || 0) + totalMensais + totalEspeciais;
+    const tipoLabel = { semestral: 'Semestral', anual: 'Anual', chaves: 'Parcela final (chaves)', avulsa: 'Avulsa' };
 
     html += `<div class="card mb-16">
       <div class="card-header">
         <span class="card-title">${im.nome}</span>
         <span class="tag tag-info">${fin.tipo === 'banco' ? fin.credor || 'Banco' : 'Construtora'} · ${fin.sistema}</span>
       </div>
-      <div style="display:grid;grid-template-columns:repeat(4,1fr);gap:12px;margin-bottom:16px">
+
+      <div style="display:grid;grid-template-columns:repeat(4,1fr);gap:12px;margin-bottom:20px">
         <div><div class="metric-label">Saldo devedor inicial</div><div class="fw-600 text-mono">${fmtBRL(fin.saldoDevedor)}</div></div>
         <div><div class="metric-label">Saldo hoje (estimado)</div><div class="fw-600 text-mono color-danger">${fmtBRL(saldoHoje)}</div></div>
         <div><div class="metric-label">Taxa de juros</div><div class="fw-600 text-mono">${fmtPct(fin.taxaJurosAnual)} a.a. / ${fmtPct(taxaM, 3)} a.m.</div></div>
         <div><div class="metric-label">Prazo restante</div><div class="fw-600 text-mono">${fin.prazoMeses} meses</div></div>
-        <div><div class="metric-label">1ª parcela (${fin.sistema})</div><div class="fw-600 text-mono">${fmtBRL(primeiraParc?.parcela)}</div></div>
-        <div><div class="metric-label">Total de parcelas</div><div class="fw-600 text-mono">${fmtBRL(totalParcelas)}</div></div>
-        <div><div class="metric-label">Total de juros</div><div class="fw-600 text-mono color-danger">${fmtBRL(totalJuros)}</div></div>
-        <div><div class="metric-label">Custo efetivo total</div><div class="fw-600 text-mono">${fmtBRL(fin.entrada + totalParcelas)}</div></div>
+        <div><div class="metric-label">1ª parcela mensal (${fin.sistema})</div><div class="fw-600 text-mono">${fmtBRL(primeiraParc?.parcela)}</div></div>
+        <div><div class="metric-label">Total parcelas mensais</div><div class="fw-600 text-mono">${fmtBRL(totalMensais)}</div></div>
+        <div><div class="metric-label">Total parcelas especiais</div><div class="fw-600 text-mono color-warn">${fmtBRL(totalEspeciais)}</div></div>
+        <div><div class="metric-label">Custo total do contrato</div><div class="fw-600 text-mono">${fmtBRL(totalGeral)}</div></div>
       </div>
-      <div class="section-title">Tabela de amortização (primeiros 24 meses)</div>
+
+      <div class="section-title" style="display:flex;justify-content:space-between;align-items:center;border-bottom:1px solid var(--border);padding-bottom:8px;margin-bottom:12px">
+        <span style="font-size:13px;font-weight:600;color:var(--text2);text-transform:uppercase;letter-spacing:0.05em">Parcelas especiais — semestrais, anuais, intermediárias e chaves</span>
+        <button class="btn btn-primary btn-sm" onclick="openModalParcelaEspecial('${im.id}')">+ Adicionar parcela</button>
+      </div>
+
+      ${especiais.length === 0
+        ? `<div style="padding:20px;text-align:center;color:var(--text3);font-size:13px;background:var(--surface2);border-radius:var(--radius-sm);margin-bottom:20px">
+            Nenhuma parcela especial cadastrada. Adicione parcelas semestrais, anuais ou a parcela final (chaves).
+           </div>`
+        : `<div class="table-wrap" style="margin-bottom:20px">
+            <table>
+              <thead><tr>
+                <th>Descrição</th><th>Tipo</th><th>Vencimento</th>
+                <th class="td-right">Valor</th><th>Status</th><th></th>
+              </tr></thead>
+              <tbody>
+                ${especiais.map(p => {
+                  const venc = new Date(p.data + '-02');
+                  const atrasado = !p.pago && venc < new Date();
+                  const statusTag = p.pago
+                    ? '<span class="tag tag-ok">Pago</span>'
+                    : atrasado ? '<span class="tag tag-danger">Em atraso</span>'
+                    : '<span class="tag tag-warn">Pendente</span>';
+                  return `<tr>
+                    <td style="font-weight:500">${p.descricao || tipoLabel[p.tipo] || p.tipo}</td>
+                    <td><span class="tag tag-info">${tipoLabel[p.tipo] || p.tipo}</span></td>
+                    <td class="td-mono">${fmtDate(p.data)}</td>
+                    <td class="td-right td-mono fw-600">${fmtBRL(p.valor)}</td>
+                    <td>${statusTag}</td>
+                    <td style="display:flex;gap:4px">
+                      <button class="btn btn-ghost btn-sm" onclick="togglePagoEspecial('${im.id}','${p.id}')">${p.pago ? 'Desfazer' : 'Marcar pago'}</button>
+                      <button class="btn btn-danger btn-sm" onclick="deletarParcelaEspecial('${im.id}','${p.id}')">✕</button>
+                    </td>
+                  </tr>`;
+                }).join('')}
+              </tbody>
+            </table>
+           </div>`}
+
+      <div class="section-title" style="font-size:13px;font-weight:600;color:var(--text2);text-transform:uppercase;letter-spacing:0.05em;border-bottom:1px solid var(--border);padding-bottom:8px;margin-bottom:12px">
+        Fluxo completo de pagamentos — mensais + especiais (${amort.length} meses)
+      </div>
       <div class="table-wrap">
         <table>
-          <thead><tr><th>Mês</th><th class="td-right">Parcela</th><th class="td-right">Amortização</th><th class="td-right">Juros</th><th class="td-right">Saldo devedor</th></tr></thead>
+          <thead><tr>
+            <th style="width:40px">#</th>
+            <th>Data</th>
+            <th>Tipo</th>
+            <th class="td-right">Parcela mensal</th>
+            <th class="td-right">Parcela especial</th>
+            <th class="td-right">Total do mês</th>
+            <th class="td-right">Amortização</th>
+            <th class="td-right">Juros</th>
+            <th class="td-right">Saldo devedor</th>
+            <th>Status</th>
+            <th>Ação</th>
+          </tr></thead>
           <tbody>
-            ${amort.slice(0, 24).map(r => `<tr>
-              <td>${r.mes}</td>
-              <td class="td-right td-mono">${fmtBRL(r.parcela)}</td>
-              <td class="td-right td-mono color-success">${fmtBRL(r.amort)}</td>
-              <td class="td-right td-mono color-danger">${fmtBRL(r.juros)}</td>
-              <td class="td-right td-mono">${fmtBRL(r.saldo)}</td>
-            </tr>`).join('')}
+            ${(() => {
+              const inicio = new Date((fin.dataInicio || im.dataAquisicao || new Date().toISOString().slice(0,7)) + '-02');
+              const mesesComEspecial = {};
+              especiais.forEach(p => { mesesComEspecial[p.data] = p; });
+              const meses = ['Jan','Fev','Mar','Abr','Mai','Jun','Jul','Ago','Set','Out','Nov','Dez'];
+              const pagas = im.parcelasMensaisPagas || {};
+              return amort.map((r, i) => {
+                const d = new Date(inicio);
+                d.setMonth(d.getMonth() + i);
+                const mesKey = `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}`;
+                const dataFmt = `${meses[d.getMonth()]}/${d.getFullYear()}`;
+                const esp = mesesComEspecial[mesKey];
+                const pgto = pagas[mesKey];
+                const isPago = !!pgto;
+                const hoje = new Date();
+                const isFuturo = d > hoje;
+                const totalMes = (pgto ? pgto.valorPago : r.parcela) + (esp ? esp.valor : 0);
+                const isEsp = !!esp;
+
+                let rowBg = '';
+                if (isPago) rowBg = 'background:var(--success-light);';
+                else if (isEsp && !isFuturo) rowBg = 'background:var(--warning-light);';
+                else if (isFuturo) rowBg = 'opacity:0.6;';
+
+                const statusCell = isPago
+                  ? `<span class="tag tag-ok" style="font-size:10px">✓ Pago</span>`
+                  : isFuturo
+                  ? `<span class="tag" style="font-size:10px;background:var(--surface2);color:var(--text3)">Projetado</span>`
+                  : `<span class="tag tag-danger" style="font-size:10px">Pendente</span>`;
+
+                const parcelaExibida = isPago ? pgto.valorPago : r.parcela;
+                const amortExibida = isPago ? (pgto.amort ?? r.amort) : r.amort;
+                const jurosExibidos = isPago ? (pgto.juros ?? r.juros) : r.juros;
+
+                return `<tr style="${rowBg}">
+                  <td style="color:var(--text3);font-size:12px">${r.mes}</td>
+                  <td class="td-mono" style="font-weight:500">${dataFmt}</td>
+                  <td>${isEsp ? `<span class="tag tag-warn" style="font-size:10px">${tipoLabel[esp.tipo]||esp.tipo}</span>` : ''}</td>
+                  <td class="td-right td-mono">${fmtBRL(parcelaExibida)}</td>
+                  <td class="td-right td-mono" style="color:${isEsp?'var(--warning)':'var(--text3)'}">
+                    ${isEsp ? `<strong>${fmtBRL(esp.valor)}</strong>` : '—'}
+                  </td>
+                  <td class="td-right td-mono fw-600">${fmtBRL(totalMes)}</td>
+                  <td class="td-right td-mono color-success">${fmtBRL(amortExibida)}</td>
+                  <td class="td-right td-mono color-danger">${fmtBRL(jurosExibidos)}</td>
+                  <td class="td-right td-mono">${fmtBRL(isPago ? calcSaldoAposNMeses(im, i+1) : r.saldo)}</td>
+                  <td>${statusCell}</td>
+                  <td>
+                    ${isPago
+                      ? `<button class="btn btn-ghost btn-sm" onclick="desmarcarParcela('${im.id}','${mesKey}')">Desfazer</button>`
+                      : `<button class="btn btn-primary btn-sm" onclick="openModalMarcarPago('${im.id}','${mesKey}',${r.parcela},${r.amort},${r.juros})">Marcar pago</button>`}
+                  </td>
+                </tr>`;
+              }).join('');
+            })()}
           </tbody>
         </table>
       </div>
-      ${amort.length > 24 ? `<div style="text-align:center;padding:12px;font-size:12px;color:var(--text3)">Exibindo 24 de ${amort.length} meses</div>` : ''}
+      <div style="display:flex;gap:16px;padding:12px 0;font-size:12px;color:var(--text3)">
+        <span>Total: ${amort.length} parcelas mensais</span>
+        <span>·</span>
+        <span style="color:var(--warning)">${especiais.length} parcela${especiais.length !== 1 ? 's' : ''} especia${especiais.length !== 1 ? 'is' : 'l'} integrada${especiais.length !== 1 ? 's' : ''}</span>
+      </div>
     </div>`;
   });
 
   c.innerHTML = html;
 }
 
+function openModalParcelaEspecial(imovelId) {
+  document.getElementById('modal-title').textContent = 'Adicionar parcela especial';
+  document.getElementById('modal-body').innerHTML = `
+    <div class="alert alert-info" style="margin-bottom:16px">
+      Use para registrar parcelas intermediárias da construtora: semestrais, anuais, balões ou a parcela final (chaves).
+    </div>
+    <div class="form-grid">
+      <div class="form-group">
+        <label>Tipo de parcela</label>
+        <select id="pe-tipo">
+          <option value="semestral">Semestral</option>
+          <option value="anual">Anual</option>
+          <option value="chaves">Parcela final (chaves)</option>
+          <option value="avulsa">Avulsa / intermediária</option>
+        </select>
+      </div>
+      <div class="form-group">
+        <label>Vencimento (mês/ano)</label>
+        <input type="month" id="pe-data">
+      </div>
+      <div class="form-group">
+        <label>Valor (R$)</label>
+        <input id="pe-valor" placeholder="Ex: 30000">
+      </div>
+      <div class="form-group">
+        <label>Descrição (opcional)</label>
+        <input id="pe-desc" placeholder="Ex: 1º semestral, Balão dez/2025...">
+      </div>
+      <div class="form-group">
+        <label>Situação</label>
+        <select id="pe-pago">
+          <option value="false">Pendente</option>
+          <option value="true">Já pago</option>
+        </select>
+      </div>
+    </div>
+    <div class="divider"></div>
+    <div style="font-size:12px;color:var(--text2)">
+      <strong>Dica:</strong> Para múltiplas parcelas semestrais ou anuais, adicione uma por vez com a data de cada vencimento.
+    </div>
+  `;
+  document.getElementById('modal-footer').innerHTML = `
+    <button class="btn btn-secondary" onclick="closeModal()">Cancelar</button>
+    <button class="btn btn-primary" onclick="salvarParcelaEspecial('${imovelId}')">Adicionar parcela</button>
+  `;
+  openModal();
+}
+
+function salvarParcelaEspecial(imovelId) {
+  const valor = parseFloat(document.getElementById('pe-valor').value);
+  const data = document.getElementById('pe-data').value;
+  if (!valor || !data) { alert('Informe o vencimento e o valor'); return; }
+  const im = state.imoveis.find(i => i.id === imovelId);
+  if (!im) return;
+  if (!im.parcelasEspeciais) im.parcelasEspeciais = [];
+  im.parcelasEspeciais.push({
+    id: Date.now().toString(),
+    tipo: document.getElementById('pe-tipo').value,
+    data,
+    valor,
+    descricao: document.getElementById('pe-desc').value,
+    pago: document.getElementById('pe-pago').value === 'true'
+  });
+  save();
+  closeModal();
+  renderFinanciamento();
+}
+
+function togglePagoEspecial(imovelId, parcelaId) {
+  const im = state.imoveis.find(i => i.id === imovelId);
+  if (!im) return;
+  const p = (im.parcelasEspeciais || []).find(p => p.id === parcelaId);
+  if (p) p.pago = !p.pago;
+  save();
+  renderFinanciamento();
+}
+
+function deletarParcelaEspecial(imovelId, parcelaId) {
+  if (!confirm('Remover esta parcela especial?')) return;
+  const im = state.imoveis.find(i => i.id === imovelId);
+  if (!im) return;
+  im.parcelasEspeciais = (im.parcelasEspeciais || []).filter(p => p.id !== parcelaId);
+  save();
+  renderFinanciamento();
+}
+
 // ─── FLUXO DE CAIXA ───────────────────────────────────────────────────────────
+// Gera saídas automáticas do financiamento para um mês
+function getSaidasFinanciamentoMes(mes) {
+  const auto = [];
+  state.imoveis.forEach(im => {
+    if (!im.financiamento) return;
+    const parcelas = getParcelasMensaisFluxo(im);
+    const p = parcelas.find(x => x.mes === mes);
+    if (p) {
+      auto.push({
+        id: `fin_mensal_${im.id}_${mes}`,
+        tipo: 'saida',
+        mes,
+        descricao: `Parcela mensal — ${im.nome}`,
+        valor: p.parcela,
+        imovelId: im.id,
+        origem: p.pago ? 'financiamento_pago' : 'financiamento_projetado',
+        detalhe: `Amort: ${fmtBRL(p.amort)} | Juros: ${fmtBRL(p.juros)}`
+      });
+    }
+    // Parcelas especiais do mês
+    (im.parcelasEspeciais || []).filter(pe => pe.data === mes).forEach(pe => {
+      auto.push({
+        id: `fin_esp_${pe.id}`,
+        tipo: 'saida',
+        mes,
+        descricao: `${pe.descricao || pe.tipo} — ${im.nome}`,
+        valor: pe.valor,
+        imovelId: im.id,
+        origem: pe.pago ? 'financiamento_pago' : 'financiamento_projetado'
+      });
+    });
+  });
+  return auto;
+}
+
 function renderFluxo() {
   const mesAtual = new Date().toISOString().slice(0, 7);
   document.getElementById('topbar-actions').innerHTML = `
     <input type="month" id="mes-filtro" value="${mesAtual}" onchange="renderFluxo()" style="padding:6px 10px;border:1px solid var(--border2);border-radius:var(--radius-sm);font-size:13px;background:var(--surface)">
-    <button class="btn btn-primary btn-sm" onclick="openModalLancamento()">+ Lançamento</button>`;
+    <button class="btn btn-primary btn-sm" onclick="openModalLancamento()">+ Lançamento manual</button>`;
 
   const mes = document.getElementById('mes-filtro')?.value || mesAtual;
   const lancMes = (state.lancamentos || []).filter(l => l.mes === mes);
+  const autoSaidas = getSaidasFinanciamentoMes(mes);
+
   const entradas = lancMes.filter(l => l.tipo === 'entrada');
-  const saidas = lancMes.filter(l => l.tipo === 'saida');
+  const saidasManuais = lancMes.filter(l => l.tipo === 'saida');
+  const todasSaidas = [...autoSaidas, ...saidasManuais];
+
   const totalEnt = entradas.reduce((s, l) => s + l.valor, 0);
-  const totalSai = saidas.reduce((s, l) => s + l.valor, 0);
+  const totalSai = todasSaidas.reduce((s, l) => s + l.valor, 0);
+  const totalFinanciamento = autoSaidas.reduce((s, l) => s + l.valor, 0);
   const saldo = totalEnt - totalSai;
 
   const c = document.getElementById('content');
   c.innerHTML = `
     <div class="metrics-grid">
       <div class="metric-card"><div class="metric-label">Entradas</div><div class="metric-value metric-pos">${fmtBRL(totalEnt)}</div></div>
-      <div class="metric-card"><div class="metric-label">Saídas</div><div class="metric-value metric-neg">${fmtBRL(totalSai)}</div></div>
+      <div class="metric-card"><div class="metric-label">Saídas totais</div><div class="metric-value metric-neg">${fmtBRL(totalSai)}</div></div>
       <div class="metric-card"><div class="metric-label">Saldo do mês</div><div class="metric-value ${saldo >= 0 ? 'metric-pos' : 'metric-neg'}">${fmtBRL(saldo)}</div></div>
-      <div class="metric-card"><div class="metric-label">Lançamentos</div><div class="metric-value">${lancMes.length}</div></div>
+      <div class="metric-card"><div class="metric-label">Parcelas financiamento</div><div class="metric-value metric-neg">${fmtBRL(totalFinanciamento)}</div><div class="metric-sub">gerado automaticamente</div></div>
     </div>
+
     <div class="two-col">
       <div class="card">
         <div class="card-header"><span class="card-title">Entradas</span><button class="btn btn-ghost btn-sm" onclick="openModalLancamento('entrada')">+ Adicionar</button></div>
-        ${entradas.length === 0 ? `<div style="text-align:center;padding:30px;color:var(--text3);font-size:13px">Nenhuma entrada neste mês</div>` :
-          `<table><thead><tr><th>Descrição</th><th>Imóvel</th><th class="td-right">Valor</th><th></th></tr></thead><tbody>
-          ${entradas.map(l => `<tr>
-            <td>${l.descricao}</td>
-            <td><span style="font-size:11px;color:var(--text3)">${state.imoveis.find(i => i.id === l.imovelId)?.nome || '—'}</span></td>
-            <td class="td-right td-mono color-success">${fmtBRL(l.valor)}</td>
-            <td><button class="btn btn-ghost btn-sm" onclick="deletarLancamento('${l.id}')">✕</button></td>
-          </tr>`).join('')}
+        ${entradas.length === 0
+          ? `<div style="text-align:center;padding:30px;color:var(--text3);font-size:13px">Nenhuma entrada neste mês</div>`
+          : `<table><thead><tr><th>Descrição</th><th>Imóvel</th><th class="td-right">Valor</th><th></th></tr></thead><tbody>
+            ${entradas.map(l => `<tr>
+              <td>${l.descricao}</td>
+              <td><span style="font-size:11px;color:var(--text3)">${state.imoveis.find(i => i.id === l.imovelId)?.nome || '—'}</span></td>
+              <td class="td-right td-mono color-success">${fmtBRL(l.valor)}</td>
+              <td><button class="btn btn-ghost btn-sm" onclick="deletarLancamento('${l.id}')">✕</button></td>
+            </tr>`).join('')}
           </tbody></table>`}
       </div>
+
       <div class="card">
-        <div class="card-header"><span class="card-title">Saídas</span><button class="btn btn-ghost btn-sm" onclick="openModalLancamento('saida')">+ Adicionar</button></div>
-        ${saidas.length === 0 ? `<div style="text-align:center;padding:30px;color:var(--text3);font-size:13px">Nenhuma saída neste mês</div>` :
-          `<table><thead><tr><th>Descrição</th><th>Imóvel</th><th class="td-right">Valor</th><th></th></tr></thead><tbody>
-          ${saidas.map(l => `<tr>
-            <td>${l.descricao}</td>
-            <td><span style="font-size:11px;color:var(--text3)">${state.imoveis.find(i => i.id === l.imovelId)?.nome || '—'}</span></td>
-            <td class="td-right td-mono color-danger">${fmtBRL(l.valor)}</td>
-            <td><button class="btn btn-ghost btn-sm" onclick="deletarLancamento('${l.id}')">✕</button></td>
-          </tr>`).join('')}
-          </tbody></table>`}
+        <div class="card-header"><span class="card-title">Saídas</span><button class="btn btn-ghost btn-sm" onclick="openModalLancamento('saida')">+ Adicionar manual</button></div>
+
+        ${autoSaidas.length > 0 ? `
+          <div style="font-size:11px;font-weight:600;color:var(--text3);text-transform:uppercase;letter-spacing:0.05em;margin-bottom:8px;display:flex;align-items:center;gap:6px">
+            <span style="width:8px;height:8px;border-radius:50%;background:var(--accent);display:inline-block"></span>
+            Financiamentos (automático)
+          </div>
+          <table style="margin-bottom:12px"><thead><tr><th>Descrição</th><th>Imóvel</th><th class="td-right">Valor</th><th>Status</th></tr></thead><tbody>
+            ${autoSaidas.map(l => {
+              const isPago = l.origem === 'financiamento_pago';
+              return `<tr style="${isPago ? '' : 'opacity:0.7'}">
+                <td>
+                  <div style="font-weight:500">${l.descricao}</div>
+                  ${l.detalhe ? `<div style="font-size:11px;color:var(--text3)">${l.detalhe}</div>` : ''}
+                </td>
+                <td><span style="font-size:11px;color:var(--text3)">${state.imoveis.find(i => i.id === l.imovelId)?.nome || '—'}</span></td>
+                <td class="td-right td-mono color-danger">${fmtBRL(l.valor)}</td>
+                <td>${isPago
+                  ? '<span class="tag tag-ok">Pago</span>'
+                  : '<span class="tag tag-warn" style="font-size:10px">Projetado</span>'}</td>
+              </tr>`;
+            }).join('')}
+          </tbody></table>
+        ` : ''}
+
+        ${saidasManuais.length > 0 ? `
+          <div style="font-size:11px;font-weight:600;color:var(--text3);text-transform:uppercase;letter-spacing:0.05em;margin-bottom:8px;display:flex;align-items:center;gap:6px">
+            <span style="width:8px;height:8px;border-radius:50%;background:var(--text3);display:inline-block"></span>
+            Despesas manuais
+          </div>
+          <table><thead><tr><th>Descrição</th><th>Imóvel</th><th class="td-right">Valor</th><th></th></tr></thead><tbody>
+            ${saidasManuais.map(l => `<tr>
+              <td>${l.descricao}</td>
+              <td><span style="font-size:11px;color:var(--text3)">${state.imoveis.find(i => i.id === l.imovelId)?.nome || '—'}</span></td>
+              <td class="td-right td-mono color-danger">${fmtBRL(l.valor)}</td>
+              <td><button class="btn btn-ghost btn-sm" onclick="deletarLancamento('${l.id}')">✕</button></td>
+            </tr>`).join('')}
+          </tbody></table>
+        ` : ''}
+
+        ${todasSaidas.length === 0
+          ? `<div style="text-align:center;padding:30px;color:var(--text3);font-size:13px">Nenhuma saída neste mês</div>`
+          : ''}
       </div>
     </div>`;
 }
