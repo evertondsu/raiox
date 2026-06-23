@@ -408,27 +408,31 @@ function gerarAmortizacao(imovel) {
 function gerarAmortizacaoConstrutora(imovel) {
   const fin = imovel.financiamento;
   const valorContrato = fin.valorContrato || imovel.precoAquisicao || 0;
+  const entrada = fin.entrada || 0;
   const prazoMeses = fin.prazoMeses || 0;
+  const taxaMensal = (fin.jurosCompensatorios || 1) / 100; // 1% a.m. padrão
   const inicio = new Date((fin.dataInicio || imovel.dataAquisicao || getMesAtual()) + '-02');
   const pagas = imovel.parcelasMensaisPagas || {};
   const parcelaProjEstimada = fin.parcelaMensalEstimada || (valorContrato / Math.max(prazoMeses, 1));
   const rows = [];
-  let saldoRestante = valorContrato - (fin.entrada || 0);
-
-  // Desconta especiais do saldo restante para não duplicar
-  const totalEspeciais = (imovel.parcelasEspeciais || []).reduce((s, p) => s + p.valor, 0);
+  let saldo = valorContrato - entrada;
 
   for (let i = 1; i <= prazoMeses; i++) {
     const d = new Date(inicio); d.setMonth(d.getMonth() + i - 1);
     const mesKey = `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}`;
     const pg = pagas[mesKey];
-    const valorParcela = pg ? pg.valorPago : parcelaProjEstimada;
-    const saldoAntes = saldoRestante;
-    saldoRestante = Math.max(0, saldoRestante - valorParcela);
-    rows.push({
-      mes: i, parcela: valorParcela, amort: valorParcela, juros: 0,
-      saldo: saldoAntes, pago: !!pg, mesKey
-    });
+    const saldoAntes = saldo;
+
+    if (pg) {
+      // Pago: valor do boleto já vem corrigido, só abate direto
+      saldo = Math.max(0, saldo - pg.valorPago);
+      rows.push({ mes: i, mesKey, parcela: pg.valorPago, jurosProjetados: 0, amort: pg.valorPago, saldo: saldoAntes, pago: true });
+    } else {
+      // Futuro: cresce 1% a.m. de juros compensatórios
+      const juros = saldo * taxaMensal;
+      saldo = Math.max(0, (saldo + juros) - parcelaProjEstimada);
+      rows.push({ mes: i, mesKey, parcela: parcelaProjEstimada, jurosProjetados: juros, amort: parcelaProjEstimada, saldo: saldoAntes, pago: false });
+    }
   }
   return rows;
 }
@@ -454,16 +458,27 @@ function calcSaldoAtual(imovel) {
 }
 
 function calcSaldoAtualConstrutora(imovel) {
+  // Recalcula o saldo percorrendo mês a mês até hoje
+  const rows = gerarAmortizacaoConstrutora(imovel);
   const fin = imovel.financiamento;
-  const valorContrato = fin.valorContrato || imovel.precoAquisicao || 0;
-  const entrada = fin.entrada || 0;
-  // Total pago em parcelas mensais
-  const totalMensaisPagos = Object.values(imovel.parcelasMensaisPagas || {})
-    .reduce((s, p) => s + (p.valorPago || 0), 0);
-  // Total pago em parcelas especiais marcadas como pagas
-  const totalEspeciaisPagos = (imovel.parcelasEspeciais || [])
+  const inicio = new Date((fin.dataInicio || imovel.dataAquisicao || getMesAtual()) + '-02');
+  const hoje = getHoje();
+  const taxaMensal = (fin.jurosCompensatorios || 1) / 100;
+  let saldo = (fin.valorContrato || imovel.precoAquisicao || 0) - (fin.entrada || 0);
+  rows.forEach((r, i) => {
+    const d = new Date(inicio); d.setMonth(d.getMonth() + i);
+    if (d <= hoje) {
+      if (r.pago) {
+        saldo = Math.max(0, saldo - r.parcela);
+      } else {
+        saldo = Math.max(0, (saldo * (1 + taxaMensal)) - r.parcela);
+      }
+    }
+  });
+  // Desconta também parcelas especiais pagas
+  const especiaisPagas = (imovel.parcelasEspeciais || [])
     .filter(p => p.pago).reduce((s, p) => s + p.valor, 0);
-  return Math.max(0, valorContrato - entrada - totalMensaisPagos - totalEspeciaisPagos);
+  return Math.max(0, saldo - especiaisPagas);
 }
 
 // Total pago real (construtora) ou projetado (banco)
@@ -1188,7 +1203,7 @@ function renderFinanciamento() {
             <th class="td-right">Parcela mensal</th>
             <th class="td-right">Parcela especial</th>
             <th class="td-right">Total do mês</th>
-            ${isConstrutora(im) ? '' : '<th class="td-right">Amortização</th><th class="td-right">Juros</th>'}
+            ${isConstrutora(im) ? '<th class="td-right">Juros proj.</th>' : '<th class="td-right">Amortização</th><th class="td-right">Juros</th>'}
             <th class="td-right">Saldo restante</th>
             <th>Status</th>
             <th>Ação</th>
@@ -1224,9 +1239,10 @@ function renderFinanciamento() {
                   ? `<span class="tag" style="font-size:10px;background:var(--surface2);color:var(--text3)">Projetado</span>`
                   : `<span class="tag tag-danger" style="font-size:10px">Pendente</span>`;
 
-                const extraCols = isConstrutora(im) ? '' : `
-                  <td class="td-right td-mono color-success">${fmtBRL(isPago ? (pgto.amort ?? r.amort) : r.amort)}</td>
-                  <td class="td-right td-mono color-danger">${fmtBRL(isPago ? (pgto.juros ?? r.juros) : r.juros)}</td>`;
+                const extraCols = isConstrutora(im)
+                  ? `<td class="td-right td-mono color-danger" title="Juros compensatórios 1% a.m. projetados">${r.pago ? '—' : fmtBRL(r.jurosProjetados||0)}</td>`
+                  : `<td class="td-right td-mono color-success">${fmtBRL(isPago ? (pgto.amort ?? r.amort) : r.amort)}</td>
+                     <td class="td-right td-mono color-danger">${fmtBRL(isPago ? (pgto.juros ?? r.juros) : r.juros)}</td>`;
 
                 return `<tr style="${rowBg}">
                   <td style="color:var(--text3);font-size:12px">${r.mes}</td>
