@@ -410,10 +410,18 @@ function gerarAmortizacaoConstrutora(imovel) {
   const valorContrato = fin.valorContrato || imovel.precoAquisicao || 0;
   const entrada = fin.entrada || 0;
   const prazoMeses = fin.prazoMeses || 0;
-  const taxaMensal = (fin.jurosCompensatorios || 1) / 100; // 1% a.m. padrão
+  const taxaMensal = (fin.jurosCompensatorios != null && fin.jurosCompensatorios !== '' ? fin.jurosCompensatorios : 1) / 100;
   const inicio = new Date((fin.dataInicio || imovel.dataAquisicao || getMesAtual()) + '-02');
   const pagas = imovel.parcelasMensaisPagas || {};
   const parcelaProjEstimada = fin.parcelaMensalEstimada || (valorContrato / Math.max(prazoMeses, 1));
+
+  // Monta mapa de especiais por mês (pagas e pendentes)
+  const especiaisPorMes = {};
+  (imovel.parcelasEspeciais || []).forEach(p => {
+    if (!especiaisPorMes[p.data]) especiaisPorMes[p.data] = [];
+    especiaisPorMes[p.data].push(p);
+  });
+
   const rows = [];
   let saldo = valorContrato - entrada;
 
@@ -421,23 +429,26 @@ function gerarAmortizacaoConstrutora(imovel) {
     const d = new Date(inicio); d.setMonth(d.getMonth() + i - 1);
     const mesKey = `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}`;
     const pg = pagas[mesKey];
+    const especiaisMes = especiaisPorMes[mesKey] || [];
+    const totalEspeciaisMes = especiaisMes.reduce((s, e) => s + e.valor, 0);
     const saldoAntes = saldo;
 
     if (pg) {
-      // Pago: valor do boleto já vem corrigido, só abate direto
-      saldo = Math.max(0, saldo - pg.valorPago);
-      rows.push({ mes: i, mesKey, parcela: pg.valorPago, jurosProjetados: 0, amort: pg.valorPago, saldo: saldoAntes, pago: true });
+      // Pago: valor do boleto já vem corrigido, abate mensal + especiais pagas do mês
+      const especiaisMesPagas = especiaisMes.filter(e => e.pago).reduce((s, e) => s + e.valor, 0);
+      saldo = Math.max(0, saldo - pg.valorPago - especiaisMesPagas);
+      rows.push({ mes: i, mesKey, parcela: pg.valorPago, jurosProjetados: 0, amort: pg.valorPago, saldo: saldoAntes, pago: true, totalEspeciaisMes });
     } else {
-      // Futuro: cresce 1% a.m. de juros compensatórios
+      // Futuro: aplica juros compensatórios, desconta parcela estimada + especiais do mês
       const juros = saldo * taxaMensal;
-      saldo = Math.max(0, (saldo + juros) - parcelaProjEstimada);
-      rows.push({ mes: i, mesKey, parcela: parcelaProjEstimada, jurosProjetados: juros, amort: parcelaProjEstimada, saldo: saldoAntes, pago: false });
+      saldo = Math.max(0, (saldo + juros) - parcelaProjEstimada - totalEspeciaisMes);
+      rows.push({ mes: i, mesKey, parcela: parcelaProjEstimada, jurosProjetados: juros, amort: parcelaProjEstimada, saldo: saldoAntes, pago: false, totalEspeciaisMes });
     }
   }
   return rows;
 }
 
-// Saldo devedor atual
+// Saldo devedor atual — para construtora usa o saldo PROJETADO com juros até hoje
 function calcSaldoAtual(imovel) {
   if (!imovel.financiamento) return 0;
   if (isConstrutora(imovel)) return calcSaldoAtualConstrutora(imovel);
@@ -458,27 +469,29 @@ function calcSaldoAtual(imovel) {
 }
 
 function calcSaldoAtualConstrutora(imovel) {
-  // Recalcula o saldo percorrendo mês a mês até hoje
+  // Percorre mês a mês até hoje, aplicando juros nos meses não pagos
+  // e descontando especiais no mês do vencimento
   const rows = gerarAmortizacaoConstrutora(imovel);
   const fin = imovel.financiamento;
   const inicio = new Date((fin.dataInicio || imovel.dataAquisicao || getMesAtual()) + '-02');
   const hoje = getHoje();
-  const taxaMensal = (fin.jurosCompensatorios || 1) / 100;
+  const taxaMensal = (fin.jurosCompensatorios != null && fin.jurosCompensatorios !== '' ? fin.jurosCompensatorios : 1) / 100;
   let saldo = (fin.valorContrato || imovel.precoAquisicao || 0) - (fin.entrada || 0);
+
   rows.forEach((r, i) => {
     const d = new Date(inicio); d.setMonth(d.getMonth() + i);
     if (d <= hoje) {
       if (r.pago) {
-        saldo = Math.max(0, saldo - r.parcela);
+        // Especiais pagas do mês já estão embutidas na lógica de gerarAmortizacaoConstrutora
+        const especiaisMesPagas = (imovel.parcelasEspeciais || [])
+          .filter(e => e.data === r.mesKey && e.pago).reduce((s, e) => s + e.valor, 0);
+        saldo = Math.max(0, saldo - r.parcela - especiaisMesPagas);
       } else {
-        saldo = Math.max(0, (saldo * (1 + taxaMensal)) - r.parcela);
+        saldo = Math.max(0, (saldo * (1 + taxaMensal)) - r.parcela - r.totalEspeciaisMes);
       }
     }
   });
-  // Desconta também parcelas especiais pagas
-  const especiaisPagas = (imovel.parcelasEspeciais || [])
-    .filter(p => p.pago).reduce((s, p) => s + p.valor, 0);
-  return Math.max(0, saldo - especiaisPagas);
+  return saldo;
 }
 
 // Total pago real (construtora) ou projetado (banco)
@@ -1087,6 +1100,16 @@ function desmarcarParcela(imovelId, mesKey) {
   renderFinanciamento();
 }
 
+function salvarTaxaJuros(imovelId) {
+  const im = state.imoveis.find(i => i.id === imovelId);
+  if (!im || !im.financiamento) return;
+  const val = parseFloat(document.getElementById(`taxa-edit-${imovelId}`)?.value);
+  if (isNaN(val) || val < 0) { alert('Informe uma taxa válida'); return; }
+  im.financiamento.jurosCompensatorios = val;
+  save();
+  renderFinanciamento();
+}
+
 // ─── FINANCIAMENTO ────────────────────────────────────────────────────────────
 function renderFinanciamento() {
   document.getElementById('topbar-actions').innerHTML = '';
@@ -1118,14 +1141,22 @@ function renderFinanciamento() {
         <div style="display:grid;grid-template-columns:repeat(4,1fr);gap:12px;margin-bottom:20px">
           <div><div class="metric-label">Valor do contrato</div><div class="fw-600 text-mono">${fmtBRL(valorContrato)}</div></div>
           <div><div class="metric-label">Total pago</div><div class="fw-600 text-mono color-success">${fmtBRL(totalPago)} <span style="font-size:11px;color:var(--text3)">(${fmtPct(pctPago)})</span></div></div>
-          <div><div class="metric-label">Saldo restante</div><div class="fw-600 text-mono color-danger">${fmtBRL(saldoHoje)}</div></div>
+          <div><div class="metric-label">Saldo restante (c/ juros proj.)</div><div class="fw-600 text-mono color-danger">${fmtBRL(saldoHoje)}</div></div>
           <div><div class="metric-label">Prazo total</div><div class="fw-600 text-mono">${fin.prazoMeses} meses</div></div>
           <div><div class="metric-label">Entrada</div><div class="fw-600 text-mono">${fmtBRL(fin.entrada||0)}</div></div>
           <div><div class="metric-label">Parcelas mensais pagas</div><div class="fw-600 text-mono">${fmtBRL(totalMensaisPagos)}</div></div>
           <div><div class="metric-label">Parcelas especiais pagas</div><div class="fw-600 text-mono color-warn">${fmtBRL(totalEspeciaisPagos)}</div></div>
           <div><div class="metric-label">Índice de correção</div><div class="fw-600">${fin.indiceCorrecao||'—'}</div></div>
         </div>
-        ${fin.jurosCompensatorios ? `<div class="alert alert-warn" style="margin-bottom:16px">Após habite-se: juros compensatórios de ${fin.jurosCompensatorios}% a.m. passam a incidir sobre o saldo devedor.</div>` : ''}`;
+        <div class="alert alert-warn" style="margin-bottom:16px;display:flex;align-items:center;gap:12px;flex-wrap:wrap">
+          <span>Juros compensatórios sobre saldo devedor (meses não pagos):</span>
+          <div style="display:flex;align-items:center;gap:6px">
+            <input id="taxa-edit-${im.id}" type="number" step="0.1" min="0" value="${fin.jurosCompensatorios != null ? fin.jurosCompensatorios : 1}"
+              style="width:70px;padding:4px 8px;border:1px solid var(--border2);border-radius:var(--radius-sm);font-size:13px;text-align:center">
+            <span style="font-size:13px">% a.m.</span>
+            <button class="btn btn-secondary btn-sm" onclick="salvarTaxaJuros('${im.id}')">Salvar</button>
+          </div>
+        </div>`;
     } else {
       const taxaM = (fin.taxaJurosMensal || fin.taxaJurosAnual/12) || 0;
       const totalMensais = amort.reduce((s, r) => s + r.parcela, 0);
