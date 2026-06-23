@@ -357,6 +357,13 @@ function monthsBetween(d1, d2) {
 }
 
 // ─── FINANCE CALCS ───────────────────────────────────────────────────────────
+// Modo Construtora: saldo = valor contrato - total pago (parcelas mensais + especiais)
+// Modo Banco: saldo calculado por SAC/PRICE com base na taxa
+
+function isConstrutora(imovel) {
+  return imovel.financiamento?.tipo === 'construtora';
+}
+
 function calcParcelaSAC(saldo, taxaMensal, prazoMeses) {
   const amort = saldo / prazoMeses;
   const juros = saldo * taxaMensal;
@@ -371,55 +378,116 @@ function calcParcelaPrice(saldo, taxaMensal, prazoMeses) {
 
 function gerarAmortizacao(imovel) {
   if (!imovel.financiamento) return [];
+  if (isConstrutora(imovel)) return gerarAmortizacaoConstrutora(imovel);
   const { saldoDevedor, taxaJurosMensal, prazoMeses, sistema } = imovel.financiamento;
+  const taxaM = (taxaJurosMensal || 0) / 100;
   const rows = [];
   let saldo = saldoDevedor;
-  for (let i = 1; i <= prazoMeses; i++) {
-    const { parcela, amort, juros } = sistema === 'SAC'
-      ? calcParcelaSAC(saldo, taxaJurosMensal / 100, prazoMeses - i + 1)
-      : calcParcelaPrice(saldo, taxaJurosMensal / 100, prazoMeses - i + 1);
-    rows.push({ mes: i, parcela, amort, juros, saldo });
-    saldo -= amort;
-    if (saldo < 0) saldo = 0;
+  if (sistema === 'SAC') {
+    const amortFixa = saldoDevedor / prazoMeses;
+    for (let i = 1; i <= prazoMeses; i++) {
+      const juros = saldo * taxaM;
+      rows.push({ mes: i, parcela: amortFixa + juros, amort: amortFixa, juros, saldo });
+      saldo = Math.max(0, saldo - amortFixa);
+    }
+  } else {
+    const parcelaFixa = taxaM === 0
+      ? saldoDevedor / prazoMeses
+      : saldoDevedor * (taxaM * Math.pow(1 + taxaM, prazoMeses)) / (Math.pow(1 + taxaM, prazoMeses) - 1);
+    for (let i = 1; i <= prazoMeses; i++) {
+      const juros = saldo * taxaM;
+      const amort = parcelaFixa - juros;
+      rows.push({ mes: i, parcela: parcelaFixa, amort, juros, saldo });
+      saldo = Math.max(0, saldo - amort);
+    }
   }
   return rows;
 }
 
-function calcTotalJurosPagos(imovel, ateData) {
-  const rows = gerarAmortizacao(imovel);
-  const inicio = new Date(imovel.financiamento?.dataInicio || imovel.dataAquisicao);
-  const ate = new Date(ateData || getHoje());
-  let totalJuros = 0;
-  let totalParcelas = 0;
-  rows.forEach((r, i) => {
-    const d = new Date(inicio);
-    d.setMonth(d.getMonth() + i);
-    if (d <= ate) {
-      totalJuros += r.juros;
-      totalParcelas += r.parcela;
-    }
-  });
-  return { totalJuros, totalParcelas };
+// Para construtora: gera linhas com base nas parcelas pagas reais + projeção do restante
+function gerarAmortizacaoConstrutora(imovel) {
+  const fin = imovel.financiamento;
+  const valorContrato = fin.valorContrato || imovel.precoAquisicao || 0;
+  const prazoMeses = fin.prazoMeses || 0;
+  const inicio = new Date((fin.dataInicio || imovel.dataAquisicao || getMesAtual()) + '-02');
+  const pagas = imovel.parcelasMensaisPagas || {};
+  const parcelaProjEstimada = fin.parcelaMensalEstimada || (valorContrato / Math.max(prazoMeses, 1));
+  const rows = [];
+  let saldoRestante = valorContrato - (fin.entrada || 0);
+
+  // Desconta especiais do saldo restante para não duplicar
+  const totalEspeciais = (imovel.parcelasEspeciais || []).reduce((s, p) => s + p.valor, 0);
+
+  for (let i = 1; i <= prazoMeses; i++) {
+    const d = new Date(inicio); d.setMonth(d.getMonth() + i - 1);
+    const mesKey = `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}`;
+    const pg = pagas[mesKey];
+    const valorParcela = pg ? pg.valorPago : parcelaProjEstimada;
+    const saldoAntes = saldoRestante;
+    saldoRestante = Math.max(0, saldoRestante - valorParcela);
+    rows.push({
+      mes: i, parcela: valorParcela, amort: valorParcela, juros: 0,
+      saldo: saldoAntes, pago: !!pg, mesKey
+    });
+  }
+  return rows;
 }
 
+// Saldo devedor atual
 function calcSaldoAtual(imovel) {
+  if (!imovel.financiamento) return 0;
+  if (isConstrutora(imovel)) return calcSaldoAtualConstrutora(imovel);
   const rows = gerarAmortizacao(imovel);
   const inicio = new Date((imovel.financiamento?.dataInicio || imovel.dataAquisicao || getMesAtual()) + '-02');
   const hoje = getHoje();
   const pagas = imovel.parcelasMensaisPagas || {};
   let saldo = imovel.financiamento?.saldoDevedor || 0;
   rows.forEach((r, i) => {
-    const d = new Date(inicio);
-    d.setMonth(d.getMonth() + i);
+    const d = new Date(inicio); d.setMonth(d.getMonth() + i);
     const mesKey = `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}`;
     if (d <= hoje) {
-      // Se há registro de pagamento real, usa a amortização real; senão usa a projetada
-      const pago = pagas[mesKey];
-      const amortReal = pago ? (pago.amort ?? r.amort) : r.amort;
-      saldo = Math.max(0, saldo - amortReal);
+      const pg = pagas[mesKey];
+      saldo = Math.max(0, saldo - (pg ? (pg.amort ?? r.amort) : r.amort));
     }
   });
   return saldo;
+}
+
+function calcSaldoAtualConstrutora(imovel) {
+  const fin = imovel.financiamento;
+  const valorContrato = fin.valorContrato || imovel.precoAquisicao || 0;
+  const entrada = fin.entrada || 0;
+  // Total pago em parcelas mensais
+  const totalMensaisPagos = Object.values(imovel.parcelasMensaisPagas || {})
+    .reduce((s, p) => s + (p.valorPago || 0), 0);
+  // Total pago em parcelas especiais marcadas como pagas
+  const totalEspeciaisPagos = (imovel.parcelasEspeciais || [])
+    .filter(p => p.pago).reduce((s, p) => s + p.valor, 0);
+  return Math.max(0, valorContrato - entrada - totalMensaisPagos - totalEspeciaisPagos);
+}
+
+// Total pago real (construtora) ou projetado (banco)
+function calcTotalPagoConstrutora(imovel) {
+  const fin = imovel.financiamento;
+  const entrada = fin?.entrada || 0;
+  const mensais = Object.values(imovel.parcelasMensaisPagas || {})
+    .reduce((s, p) => s + (p.valorPago || 0), 0);
+  const especiais = (imovel.parcelasEspeciais || [])
+    .filter(p => p.pago).reduce((s, p) => s + p.valor, 0);
+  return entrada + mensais + especiais;
+}
+
+function calcTotalJurosPagos(imovel, ateData) {
+  if (isConstrutora(imovel)) return { totalJuros: 0, totalParcelas: calcTotalPagoConstrutora(imovel) };
+  const rows = gerarAmortizacao(imovel);
+  const inicio = new Date(imovel.financiamento?.dataInicio || imovel.dataAquisicao);
+  const ate = new Date(ateData || getHoje());
+  let totalJuros = 0, totalParcelas = 0;
+  rows.forEach((r, i) => {
+    const d = new Date(inicio); d.setMonth(d.getMonth() + i);
+    if (d <= ate) { totalJuros += r.juros; totalParcelas += r.parcela; }
+  });
+  return { totalJuros, totalParcelas };
 }
 
 // Retorna parcelas mensais para o fluxo de caixa (pagas e projetadas)
@@ -428,47 +496,41 @@ function getParcelasMensaisFluxo(imovel) {
   const inicio = new Date((imovel.financiamento?.dataInicio || imovel.dataAquisicao || getMesAtual()) + '-02');
   const pagas = imovel.parcelasMensaisPagas || {};
   return rows.map((r, i) => {
-    const d = new Date(inicio);
-    d.setMonth(d.getMonth() + i);
-    const mesKey = `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}`;
-    const pago = pagas[mesKey];
+    const d = new Date(inicio); d.setMonth(d.getMonth() + i);
+    const mesKey = r.mesKey || `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}`;
+    const pg = pagas[mesKey];
     return {
       mes: mesKey,
-      parcela: pago ? pago.valorPago : r.parcela,
-      amort: pago ? (pago.amort ?? r.amort) : r.amort,
-      juros: pago ? (pago.juros ?? r.juros) : r.juros,
-      saldo: r.saldo,
-      pago: !!pago,
-      projetado: !pago,
-      imovelId: imovel.id,
-      imovelNome: imovel.nome
+      parcela: pg ? pg.valorPago : r.parcela,
+      amort: pg ? (pg.amort ?? r.amort) : r.amort,
+      juros: pg ? (pg.juros ?? r.juros) : r.juros,
+      saldo: r.saldo, pago: !!pg, projetado: !pg,
+      imovelId: imovel.id, imovelNome: imovel.nome
     };
   });
 }
 
 function calcCustoTotalAcumulado(imovel) {
   const aqs = imovel.precoAquisicao || 0;
-  const entrada = imovel.financiamento?.entrada || 0;
   const { totalParcelas } = calcTotalJurosPagos(imovel);
   const lancamentos = (state.lancamentos || [])
     .filter(l => l.imovelId === imovel.id && l.tipo === 'saida')
     .reduce((s, l) => s + (l.valor || 0), 0);
-  return aqs + totalParcelas + lancamentos;
+  const especiais = (imovel.parcelasEspeciais || []).reduce((s, p) => s + p.valor, 0);
+  return aqs + totalParcelas + lancamentos + especiais;
 }
 
 function calcValorizacaoMinima(imovel, anos) {
   const custo = calcCustoTotalAcumulado(imovel);
   const vm = imovel.valorMercado || imovel.precoAquisicao || 0;
-  if (!anos || anos <= 0 || !custo) return null;
-  // Valorização anual necessária para que VF = custo total
+  if (!anos || anos <= 0 || !custo || !vm) return null;
   return (Math.pow(custo / vm, 1 / anos) - 1) * 100;
 }
 
 function calcPatrimonioLiquido() {
   return state.imoveis.reduce((s, im) => {
     const vm = im.valorMercado || im.precoAquisicao || 0;
-    const saldo = calcSaldoAtual(im);
-    return s + vm - saldo;
+    return s + vm - calcSaldoAtual(im);
   }, 0);
 }
 
@@ -770,6 +832,8 @@ function openModalImovel(id) {
         <label>Valor de entrada (R$)</label>
         <input id="f-entrada" placeholder="Ex: 80000" value="${im?.financiamento?.entrada || ''}">
       </div>
+
+      <!-- BANCO: saldo devedor + juros + prazo + sistema -->
       <div class="form-group" id="f-saldo-wrap">
         <label>Saldo devedor atual (R$)</label>
         <input id="f-saldo" placeholder="Ex: 370000" value="${im?.financiamento?.saldoDevedor || ''}">
@@ -779,7 +843,7 @@ function openModalImovel(id) {
         <input id="f-taxa" placeholder="Ex: 8.5" value="${im?.financiamento?.taxaJurosAnual || ''}">
       </div>
       <div class="form-group" id="f-prazo-wrap">
-        <label>Prazo restante (meses)</label>
+        <label>Prazo total (meses)</label>
         <input id="f-prazo" placeholder="Ex: 240" value="${im?.financiamento?.prazoMeses || ''}">
       </div>
       <div class="form-group" id="f-sistema-wrap">
@@ -789,6 +853,37 @@ function openModalImovel(id) {
           <option value="PRICE" ${im?.financiamento?.sistema === 'PRICE' ? 'selected' : ''}>PRICE (parcelas fixas)</option>
         </select>
       </div>
+
+      <!-- CONSTRUTORA: valor contrato + parcelas + estimativa + índice -->
+      <div class="form-group hidden" id="f-vcontrato-wrap">
+        <label>Valor total do contrato (R$)</label>
+        <input id="f-vcontrato" placeholder="Ex: 759000" value="${im?.financiamento?.valorContrato || im?.precoAquisicao || ''}">
+        <span class="form-hint">Valor fechado na escritura</span>
+      </div>
+      <div class="form-group hidden" id="f-nparcelas-wrap">
+        <label>Número total de parcelas mensais</label>
+        <input id="f-nparcelas" placeholder="Ex: 36" value="${im?.financiamento?.prazoMeses || ''}">
+      </div>
+      <div class="form-group hidden" id="f-parcest-wrap">
+        <label>Estimativa de parcela mensal (R$)</label>
+        <input id="f-parcest" placeholder="Ex: 3800" value="${im?.financiamento?.parcelaMensalEstimada || ''}">
+        <span class="form-hint">Usado para meses ainda não lançados</span>
+      </div>
+      <div class="form-group hidden" id="f-indice-wrap">
+        <label>Índice de correção</label>
+        <select id="f-indice">
+          <option value="CUB/ES" ${im?.financiamento?.indiceCorrecao === 'CUB/ES' ? 'selected' : ''}>CUB/ES</option>
+          <option value="IGPM" ${im?.financiamento?.indiceCorrecao === 'IGPM' ? 'selected' : ''}>IGP-M</option>
+          <option value="IPCA" ${im?.financiamento?.indiceCorrecao === 'IPCA' ? 'selected' : ''}>IPCA</option>
+          <option value="Nenhum" ${im?.financiamento?.indiceCorrecao === 'Nenhum' ? 'selected' : ''}>Nenhum</option>
+        </select>
+      </div>
+      <div class="form-group hidden" id="f-jurospos-wrap">
+        <label>Juros compensatórios pós-habite-se (% a.m.)</label>
+        <input id="f-jurospos" placeholder="Ex: 1" value="${im?.financiamento?.jurosCompensatorios || ''}">
+        <span class="form-hint">Taxa que passa a vigorar após entrega das chaves</span>
+      </div>
+
       <div class="form-group" id="f-inicio-wrap">
         <label>Data de início do financiamento</label>
         <input type="month" id="f-inicio" value="${im?.financiamento?.dataInicio || ''}">
@@ -805,28 +900,50 @@ function openModalImovel(id) {
 
 function toggleFinanciamento() {
   const tipo = document.getElementById('f-fin-tipo')?.value;
-  const ids = ['f-credor-wrap','f-entrada-wrap','f-saldo-wrap','f-taxa-wrap','f-prazo-wrap','f-sistema-wrap','f-inicio-wrap'];
-  ids.forEach(id => {
-    const el = document.getElementById(id);
-    if (el) el.classList.toggle('hidden', tipo === 'nenhum');
+  const bancoFields = ['f-saldo-wrap','f-taxa-wrap','f-prazo-wrap','f-sistema-wrap'];
+  const constFields = ['f-vcontrato-wrap','f-nparcelas-wrap','f-parcest-wrap','f-indice-wrap','f-jurospos-wrap'];
+  const commonFields = ['f-credor-wrap','f-entrada-wrap','f-inicio-wrap'];
+  [...bancoFields,...constFields,...commonFields].forEach(id => {
+    document.getElementById(id)?.classList.add('hidden');
   });
+  if (tipo === 'banco') {
+    [...bancoFields,...commonFields].forEach(id => document.getElementById(id)?.classList.remove('hidden'));
+  } else if (tipo === 'construtora') {
+    [...constFields,...commonFields].forEach(id => document.getElementById(id)?.classList.remove('hidden'));
+  }
 }
 
 function salvarImovel(id) {
   const nome = document.getElementById('f-nome').value.trim();
   if (!nome) { alert('Informe o nome do imóvel'); return; }
   const finTipo = document.getElementById('f-fin-tipo').value;
-  const financiamento = finTipo === 'nenhum' ? null : {
-    tipo: finTipo,
-    credor: document.getElementById('f-credor').value,
-    entrada: parseFloat(document.getElementById('f-entrada').value) || 0,
-    saldoDevedor: parseFloat(document.getElementById('f-saldo').value) || 0,
-    taxaJurosAnual: parseFloat(document.getElementById('f-taxa').value) || 0,
-    taxaJurosMensal: (parseFloat(document.getElementById('f-taxa').value) || 0) / 12,
-    prazoMeses: parseInt(document.getElementById('f-prazo').value) || 0,
-    sistema: document.getElementById('f-sistema').value,
-    dataInicio: document.getElementById('f-inicio').value,
-  };
+  let financiamento = null;
+  if (finTipo === 'banco') {
+    const taxaAnual = parseFloat(document.getElementById('f-taxa').value) || 0;
+    financiamento = {
+      tipo: 'banco',
+      credor: document.getElementById('f-credor').value,
+      entrada: parseFloat(document.getElementById('f-entrada').value) || 0,
+      saldoDevedor: parseFloat(document.getElementById('f-saldo').value) || 0,
+      taxaJurosAnual: taxaAnual,
+      taxaJurosMensal: taxaAnual / 12,
+      prazoMeses: parseInt(document.getElementById('f-prazo').value) || 0,
+      sistema: document.getElementById('f-sistema').value,
+      dataInicio: document.getElementById('f-inicio').value,
+    };
+  } else if (finTipo === 'construtora') {
+    financiamento = {
+      tipo: 'construtora',
+      credor: document.getElementById('f-credor').value,
+      entrada: parseFloat(document.getElementById('f-entrada').value) || 0,
+      valorContrato: parseFloat(document.getElementById('f-vcontrato').value) || 0,
+      prazoMeses: parseInt(document.getElementById('f-nparcelas').value) || 0,
+      parcelaMensalEstimada: parseFloat(document.getElementById('f-parcest').value) || 0,
+      indiceCorrecao: document.getElementById('f-indice').value,
+      jurosCompensatorios: parseFloat(document.getElementById('f-jurospos').value) || 0,
+      dataInicio: document.getElementById('f-inicio').value,
+    };
+  }
   const obj = {
     id: id || Date.now().toString(),
     nome,
@@ -838,15 +955,21 @@ function salvarImovel(id) {
     obs: document.getElementById('f-obs').value,
     financiamento
   };
+  // Preserve existing pagamentos when editing
   if (id) {
+    const existing = state.imoveis.find(i => i.id === id);
+    if (existing) {
+      obj.parcelasMensaisPagas = existing.parcelasMensaisPagas || {};
+      obj.parcelasEspeciais = existing.parcelasEspeciais || [];
+    }
     const idx = state.imoveis.findIndex(i => i.id === id);
     if (idx >= 0) state.imoveis[idx] = obj;
   } else {
+    obj.parcelasMensaisPagas = {};
+    obj.parcelasEspeciais = [];
     state.imoveis.push(obj);
   }
-  save();
-  closeModal();
-  renderImoveis();
+  save(); closeModal(); renderImoveis();
 }
 
 function deletarImovel(id) {
@@ -858,6 +981,17 @@ function deletarImovel(id) {
 }
 
 function calcSaldoAposNMeses(imovel, n) {
+  if (isConstrutora(imovel)) {
+    const fin = imovel.financiamento;
+    const valorContrato = fin.valorContrato || imovel.precoAquisicao || 0;
+    const entrada = fin.entrada || 0;
+    const rows = gerarAmortizacao(imovel);
+    let saldo = valorContrato - entrada;
+    for (let i = 0; i < Math.min(n, rows.length); i++) {
+      saldo = Math.max(0, saldo - rows[i].amort);
+    }
+    return saldo;
+  }
   const rows = gerarAmortizacao(imovel);
   const inicio = new Date((imovel.financiamento?.dataInicio || imovel.dataAquisicao || getMesAtual()) + '-02');
   const pagas = imovel.parcelasMensaisPagas || {};
@@ -872,61 +1006,61 @@ function calcSaldoAposNMeses(imovel, n) {
 }
 
 function openModalMarcarPago(imovelId, mesKey, parcelaPrev, amortPrev, jurosPrev) {
+  const im = state.imoveis.find(i => i.id === imovelId);
+  const construtora = im && isConstrutora(im);
   const [ano, mes] = mesKey.split('-');
-  const meses = ['Jan','Fev','Mar','Abr','Mai','Jun','Jul','Ago','Set','Out','Nov','Dez'];
-  const dataFmt = `${meses[parseInt(mes)-1]}/${ano}`;
+  const mesesNomes = ['Jan','Fev','Mar','Abr','Mai','Jun','Jul','Ago','Set','Out','Nov','Dez'];
+  const dataFmt = `${mesesNomes[parseInt(mes)-1]}/${ano}`;
   document.getElementById('modal-title').textContent = `Registrar pagamento — ${dataFmt}`;
   document.getElementById('modal-body').innerHTML = `
     <div class="alert alert-info" style="margin-bottom:16px">
-      Confirme ou ajuste os valores reais pagos. Isso atualizará o saldo devedor e o fluxo de caixa automaticamente.
+      Confirme ou ajuste o valor real pago. O saldo devedor e o fluxo de caixa serão atualizados automaticamente.
     </div>
     <div class="form-grid">
       <div class="form-group">
         <label>Valor total pago (R$)</label>
         <input id="mp-valor" type="number" step="0.01" value="${parcelaPrev.toFixed(2)}">
-        <span class="form-hint">Valor projetado: ${fmtBRL(parcelaPrev)}</span>
+        <span class="form-hint">Valor estimado: ${fmtBRL(parcelaPrev)}</span>
       </div>
       <div class="form-group">
         <label>Data do pagamento</label>
         <input type="date" id="mp-data" value="${getHoje().toISOString().slice(0,10)}">
       </div>
+      ${construtora ? '' : `
       <div class="form-group">
         <label>Amortização real (R$)</label>
         <input id="mp-amort" type="number" step="0.01" value="${amortPrev.toFixed(2)}">
-        <span class="form-hint">Projetado: ${fmtBRL(amortPrev)}</span>
+        <span class="form-hint">Estimado: ${fmtBRL(amortPrev)}</span>
       </div>
       <div class="form-group">
         <label>Juros reais (R$)</label>
         <input id="mp-juros" type="number" step="0.01" value="${jurosPrev.toFixed(2)}">
-        <span class="form-hint">Projetado: ${fmtBRL(jurosPrev)}</span>
-      </div>
+        <span class="form-hint">Estimado: ${fmtBRL(jurosPrev)}</span>
+      </div>`}
       <div class="form-group form-full">
         <label>Observação (opcional)</label>
-        <input id="mp-obs" placeholder="Ex: Pago com desconto, valor corrigido pelo INCC...">
+        <input id="mp-obs" placeholder="Ex: Valor corrigido pelo CUB, desconto obtido...">
       </div>
-    </div>
-  `;
+    </div>`;
   document.getElementById('modal-footer').innerHTML = `
     <button class="btn btn-secondary" onclick="closeModal()">Cancelar</button>
-    <button class="btn btn-primary" onclick="marcarParcelaPaga('${imovelId}','${mesKey}')">Confirmar pagamento</button>
-  `;
+    <button class="btn btn-primary" onclick="marcarParcelaPaga('${imovelId}','${mesKey}',${construtora})">Confirmar pagamento</button>`;
   openModal();
 }
 
-function marcarParcelaPaga(imovelId, mesKey) {
+function marcarParcelaPaga(imovelId, mesKey, construtora) {
   const im = state.imoveis.find(i => i.id === imovelId);
   if (!im) return;
   if (!im.parcelasMensaisPagas) im.parcelasMensaisPagas = {};
+  const valorPago = parseFloat(document.getElementById('mp-valor').value) || 0;
   im.parcelasMensaisPagas[mesKey] = {
-    valorPago: parseFloat(document.getElementById('mp-valor').value) || 0,
-    amort: parseFloat(document.getElementById('mp-amort').value) || 0,
-    juros: parseFloat(document.getElementById('mp-juros').value) || 0,
+    valorPago,
+    amort: construtora ? valorPago : (parseFloat(document.getElementById('mp-amort').value) || 0),
+    juros: construtora ? 0 : (parseFloat(document.getElementById('mp-juros').value) || 0),
     dataPagamento: document.getElementById('mp-data').value,
     obs: document.getElementById('mp-obs').value
   };
-  save();
-  closeModal();
-  renderFinanciamento();
+  save(); closeModal(); renderFinanciamento();
 }
 
 function desmarcarParcela(imovelId, mesKey) {
@@ -951,33 +1085,57 @@ function renderFinanciamento() {
   let html = '';
   financiados.forEach(im => {
     const fin = im.financiamento;
-    const taxaM = fin.taxaJurosMensal || fin.taxaJurosAnual / 12;
     const amort = gerarAmortizacao(im);
-    const totalMensais = amort.reduce((s, r) => s + r.parcela, 0);
-    const totalJuros = amort.reduce((s, r) => s + r.juros, 0);
-    const saldoHoje = calcSaldoAtual(im);
-    const primeiraParc = amort[0];
     const especiais = (im.parcelasEspeciais || []).sort((a, b) => a.data.localeCompare(b.data));
     const totalEspeciais = especiais.reduce((s, p) => s + p.valor, 0);
-    const totalGeral = (fin.entrada || 0) + totalMensais + totalEspeciais;
     const tipoLabel = { semestral: 'Semestral', anual: 'Anual', chaves: 'Parcela final (chaves)', avulsa: 'Avulsa' };
+    const saldoHoje = calcSaldoAtual(im);
+
+    // Cards de resumo: diferentes para construtora vs banco
+    let resumoCards = '';
+    if (isConstrutora(im)) {
+      const valorContrato = fin.valorContrato || im.precoAquisicao || 0;
+      const totalPago = calcTotalPagoConstrutora(im);
+      const totalMensaisPagos = Object.values(im.parcelasMensaisPagas || {}).reduce((s,p) => s + p.valorPago, 0);
+      const totalEspeciaisPagos = (im.parcelasEspeciais||[]).filter(p=>p.pago).reduce((s,p)=>s+p.valor,0);
+      const pctPago = valorContrato > 0 ? (totalPago/valorContrato)*100 : 0;
+      resumoCards = `
+        <div style="display:grid;grid-template-columns:repeat(4,1fr);gap:12px;margin-bottom:20px">
+          <div><div class="metric-label">Valor do contrato</div><div class="fw-600 text-mono">${fmtBRL(valorContrato)}</div></div>
+          <div><div class="metric-label">Total pago</div><div class="fw-600 text-mono color-success">${fmtBRL(totalPago)} <span style="font-size:11px;color:var(--text3)">(${fmtPct(pctPago)})</span></div></div>
+          <div><div class="metric-label">Saldo restante</div><div class="fw-600 text-mono color-danger">${fmtBRL(saldoHoje)}</div></div>
+          <div><div class="metric-label">Prazo total</div><div class="fw-600 text-mono">${fin.prazoMeses} meses</div></div>
+          <div><div class="metric-label">Entrada</div><div class="fw-600 text-mono">${fmtBRL(fin.entrada||0)}</div></div>
+          <div><div class="metric-label">Parcelas mensais pagas</div><div class="fw-600 text-mono">${fmtBRL(totalMensaisPagos)}</div></div>
+          <div><div class="metric-label">Parcelas especiais pagas</div><div class="fw-600 text-mono color-warn">${fmtBRL(totalEspeciaisPagos)}</div></div>
+          <div><div class="metric-label">Índice de correção</div><div class="fw-600">${fin.indiceCorrecao||'—'}</div></div>
+        </div>
+        ${fin.jurosCompensatorios ? `<div class="alert alert-warn" style="margin-bottom:16px">Após habite-se: juros compensatórios de ${fin.jurosCompensatorios}% a.m. passam a incidir sobre o saldo devedor.</div>` : ''}`;
+    } else {
+      const taxaM = (fin.taxaJurosMensal || fin.taxaJurosAnual/12) || 0;
+      const totalMensais = amort.reduce((s, r) => s + r.parcela, 0);
+      const totalJuros = amort.reduce((s, r) => s + r.juros, 0);
+      const primeiraParc = amort[0];
+      const totalGeral = (fin.entrada||0) + totalMensais + totalEspeciais;
+      resumoCards = `
+        <div style="display:grid;grid-template-columns:repeat(4,1fr);gap:12px;margin-bottom:20px">
+          <div><div class="metric-label">Saldo devedor inicial</div><div class="fw-600 text-mono">${fmtBRL(fin.saldoDevedor)}</div></div>
+          <div><div class="metric-label">Saldo hoje (estimado)</div><div class="fw-600 text-mono color-danger">${fmtBRL(saldoHoje)}</div></div>
+          <div><div class="metric-label">Taxa de juros</div><div class="fw-600 text-mono">${fmtPct(fin.taxaJurosAnual)} a.a. / ${fmtPct(taxaM,3)} a.m.</div></div>
+          <div><div class="metric-label">Prazo restante</div><div class="fw-600 text-mono">${fin.prazoMeses} meses</div></div>
+          <div><div class="metric-label">1ª parcela (${fin.sistema})</div><div class="fw-600 text-mono">${fmtBRL(primeiraParc?.parcela)}</div></div>
+          <div><div class="metric-label">Total parcelas mensais</div><div class="fw-600 text-mono">${fmtBRL(totalMensais)}</div></div>
+          <div><div class="metric-label">Total parcelas especiais</div><div class="fw-600 text-mono color-warn">${fmtBRL(totalEspeciais)}</div></div>
+          <div><div class="metric-label">Custo total do contrato</div><div class="fw-600 text-mono">${fmtBRL(totalGeral)}</div></div>
+        </div>`;
+    }
 
     html += `<div class="card mb-16">
       <div class="card-header">
         <span class="card-title">${im.nome}</span>
-        <span class="tag tag-info">${fin.tipo === 'banco' ? fin.credor || 'Banco' : 'Construtora'} · ${fin.sistema}</span>
+        <span class="tag tag-info">${fin.tipo === 'banco' ? fin.credor || 'Banco' : fin.credor || 'Construtora'} · ${isConstrutora(im) ? (fin.indiceCorrecao||'Construtora') : fin.sistema}</span>
       </div>
-
-      <div style="display:grid;grid-template-columns:repeat(4,1fr);gap:12px;margin-bottom:20px">
-        <div><div class="metric-label">Saldo devedor inicial</div><div class="fw-600 text-mono">${fmtBRL(fin.saldoDevedor)}</div></div>
-        <div><div class="metric-label">Saldo hoje (estimado)</div><div class="fw-600 text-mono color-danger">${fmtBRL(saldoHoje)}</div></div>
-        <div><div class="metric-label">Taxa de juros</div><div class="fw-600 text-mono">${fmtPct(fin.taxaJurosAnual)} a.a. / ${fmtPct(taxaM, 3)} a.m.</div></div>
-        <div><div class="metric-label">Prazo restante</div><div class="fw-600 text-mono">${fin.prazoMeses} meses</div></div>
-        <div><div class="metric-label">1ª parcela mensal (${fin.sistema})</div><div class="fw-600 text-mono">${fmtBRL(primeiraParc?.parcela)}</div></div>
-        <div><div class="metric-label">Total parcelas mensais</div><div class="fw-600 text-mono">${fmtBRL(totalMensais)}</div></div>
-        <div><div class="metric-label">Total parcelas especiais</div><div class="fw-600 text-mono color-warn">${fmtBRL(totalEspeciais)}</div></div>
-        <div><div class="metric-label">Custo total do contrato</div><div class="fw-600 text-mono">${fmtBRL(totalGeral)}</div></div>
-      </div>
+      ${resumoCards}
 
       <div class="section-title" style="display:flex;justify-content:space-between;align-items:center;border-bottom:1px solid var(--border);padding-bottom:8px;margin-bottom:12px">
         <span style="font-size:13px;font-weight:600;color:var(--text2);text-transform:uppercase;letter-spacing:0.05em">Parcelas especiais — semestrais, anuais, intermediárias e chaves</span>
@@ -1030,9 +1188,8 @@ function renderFinanciamento() {
             <th class="td-right">Parcela mensal</th>
             <th class="td-right">Parcela especial</th>
             <th class="td-right">Total do mês</th>
-            <th class="td-right">Amortização</th>
-            <th class="td-right">Juros</th>
-            <th class="td-right">Saldo devedor</th>
+            ${isConstrutora(im) ? '' : '<th class="td-right">Amortização</th><th class="td-right">Juros</th>'}
+            <th class="td-right">Saldo restante</th>
             <th>Status</th>
             <th>Ação</th>
           </tr></thead>
@@ -1041,25 +1198,25 @@ function renderFinanciamento() {
               const inicio = new Date((fin.dataInicio || im.dataAquisicao || getMesAtual()) + '-02');
               const mesesComEspecial = {};
               especiais.forEach(p => { mesesComEspecial[p.data] = p; });
-              const meses = ['Jan','Fev','Mar','Abr','Mai','Jun','Jul','Ago','Set','Out','Nov','Dez'];
+              const mesesNomes = ['Jan','Fev','Mar','Abr','Mai','Jun','Jul','Ago','Set','Out','Nov','Dez'];
               const pagas = im.parcelasMensaisPagas || {};
+              const hoje = getHoje();
               return amort.map((r, i) => {
-                const d = new Date(inicio);
-                d.setMonth(d.getMonth() + i);
-                const mesKey = `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}`;
-                const dataFmt = `${meses[d.getMonth()]}/${d.getFullYear()}`;
+                const d = new Date(inicio); d.setMonth(d.getMonth() + i);
+                const mesKey = r.mesKey || `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}`;
+                const dataFmt = `${mesesNomes[d.getMonth()]}/${d.getFullYear()}`;
                 const esp = mesesComEspecial[mesKey];
                 const pgto = pagas[mesKey];
                 const isPago = !!pgto;
-                const hoje = getHoje();
                 const isFuturo = d > hoje;
-                const totalMes = (pgto ? pgto.valorPago : r.parcela) + (esp ? esp.valor : 0);
-                const isEsp = !!esp;
+                const parcelaExibida = isPago ? pgto.valorPago : r.parcela;
+                const totalMes = parcelaExibida + (esp ? esp.valor : 0);
+                const saldoExibido = calcSaldoAposNMeses(im, i + 1);
 
                 let rowBg = '';
                 if (isPago) rowBg = 'background:var(--success-light);';
-                else if (isEsp && !isFuturo) rowBg = 'background:var(--warning-light);';
-                else if (isFuturo) rowBg = 'opacity:0.6;';
+                else if (esp && !isFuturo) rowBg = 'background:var(--warning-light);';
+                else if (isFuturo) rowBg = 'opacity:0.65;';
 
                 const statusCell = isPago
                   ? `<span class="tag tag-ok" style="font-size:10px">✓ Pago</span>`
@@ -1067,27 +1224,26 @@ function renderFinanciamento() {
                   ? `<span class="tag" style="font-size:10px;background:var(--surface2);color:var(--text3)">Projetado</span>`
                   : `<span class="tag tag-danger" style="font-size:10px">Pendente</span>`;
 
-                const parcelaExibida = isPago ? pgto.valorPago : r.parcela;
-                const amortExibida = isPago ? (pgto.amort ?? r.amort) : r.amort;
-                const jurosExibidos = isPago ? (pgto.juros ?? r.juros) : r.juros;
+                const extraCols = isConstrutora(im) ? '' : `
+                  <td class="td-right td-mono color-success">${fmtBRL(isPago ? (pgto.amort ?? r.amort) : r.amort)}</td>
+                  <td class="td-right td-mono color-danger">${fmtBRL(isPago ? (pgto.juros ?? r.juros) : r.juros)}</td>`;
 
                 return `<tr style="${rowBg}">
                   <td style="color:var(--text3);font-size:12px">${r.mes}</td>
                   <td class="td-mono" style="font-weight:500">${dataFmt}</td>
-                  <td>${isEsp ? `<span class="tag tag-warn" style="font-size:10px">${tipoLabel[esp.tipo]||esp.tipo}</span>` : ''}</td>
+                  <td>${esp ? `<span class="tag tag-warn" style="font-size:10px">${tipoLabel[esp.tipo]||esp.tipo}</span>` : ''}</td>
                   <td class="td-right td-mono">${fmtBRL(parcelaExibida)}</td>
-                  <td class="td-right td-mono" style="color:${isEsp?'var(--warning)':'var(--text3)'}">
-                    ${isEsp ? `<strong>${fmtBRL(esp.valor)}</strong>` : '—'}
+                  <td class="td-right td-mono" style="color:${esp?'var(--warning)':'var(--text3)'}">
+                    ${esp ? `<strong>${fmtBRL(esp.valor)}</strong>` : '—'}
                   </td>
                   <td class="td-right td-mono fw-600">${fmtBRL(totalMes)}</td>
-                  <td class="td-right td-mono color-success">${fmtBRL(amortExibida)}</td>
-                  <td class="td-right td-mono color-danger">${fmtBRL(jurosExibidos)}</td>
-                  <td class="td-right td-mono">${fmtBRL(isPago ? calcSaldoAposNMeses(im, i+1) : r.saldo)}</td>
+                  ${extraCols}
+                  <td class="td-right td-mono">${fmtBRL(saldoExibido)}</td>
                   <td>${statusCell}</td>
                   <td>
                     ${isPago
                       ? `<button class="btn btn-ghost btn-sm" onclick="desmarcarParcela('${im.id}','${mesKey}')">Desfazer</button>`
-                      : `<button class="btn btn-primary btn-sm" onclick="openModalMarcarPago('${im.id}','${mesKey}',${r.parcela},${r.amort},${r.juros})">Marcar pago</button>`}
+                      : `<button class="btn btn-primary btn-sm" onclick="openModalMarcarPago('${im.id}','${mesKey}',${r.parcela},${r.amort||0},${r.juros||0})">Marcar pago</button>`}
                   </td>
                 </tr>`;
               }).join('');
@@ -1098,7 +1254,7 @@ function renderFinanciamento() {
       <div style="display:flex;gap:16px;padding:12px 0;font-size:12px;color:var(--text3)">
         <span>Total: ${amort.length} parcelas mensais</span>
         <span>·</span>
-        <span style="color:var(--warning)">${especiais.length} parcela${especiais.length !== 1 ? 's' : ''} especia${especiais.length !== 1 ? 'is' : 'l'} integrada${especiais.length !== 1 ? 's' : ''}</span>
+        <span style="color:var(--warning)">${especiais.length} parcela${especiais.length !== 1?'s':''} especia${especiais.length !== 1?'is':'l'} integrada${especiais.length !== 1?'s':''}</span>
       </div>
     </div>`;
   });
