@@ -1647,28 +1647,111 @@ function calcularAnalise() {
   if (!im) return;
 
   const vm = im.valorMercado || im.precoAquisicao || 0;
+  const fin = im.financiamento;
   const valorFuturo = vm * Math.pow(1 + valorAnual / 100, anos);
+
+  // Data futura da venda
   const dataVenda = new Date(getHoje());
   dataVenda.setFullYear(dataVenda.getFullYear() + anos);
+  const mesVenda = `${dataVenda.getFullYear()}-${String(dataVenda.getMonth()+1).padStart(2,'0')}`;
 
-  const { totalJuros, totalParcelas } = calcTotalJurosPagos(im, dataVenda.toISOString());
-  const amort = gerarAmortizacao(im);
-  const mesIdx = Math.min(anos * 12, amort.length) - 1;
-  const saldoNaVenda = mesIdx >= 0 ? Math.max(0, amort[mesIdx]?.saldo || 0) : 0;
+  let custoTotal = 0;
+  let saldoNaVenda = 0;
+  let totalJuros = 0;
+  let detalheCusto = [];
 
-  const aqs = im.precoAquisicao || 0;
-  const entrada = im.financiamento?.entrada || 0;
-  const despesas = (state.lancamentos || [])
-    .filter(l => l.imovelId === im.id && l.tipo === 'saida')
-    .reduce((s, l) => s + l.valor, 0);
+  if (isConstrutora(im)) {
+    // CONSTRUTORA: custo = entrada + todas as parcelas mensais até a venda + todas as especiais
+    const entrada = fin?.entrada || 0;
+    const valorContrato = fin?.valorContrato || im.precoAquisicao || 0;
+    const prazoMeses = fin?.prazoMeses || 0;
+    const taxaMensal = (fin?.jurosCompensatorios != null ? parseFloat(fin.jurosCompensatorios) : 1) / 100;
+    const parcelaProjEstimada = fin?.parcelaMensalEstimada || (valorContrato / Math.max(prazoMeses, 1));
+    const inicio = new Date((fin?.dataInicio || im.dataAquisicao || getMesAtual()) + '-02');
+    const pagas = im.parcelasMensaisPagas || {};
 
-  const custoTotal = aqs + totalParcelas + despesas;
+    // Parcelas mensais pagas (valores reais) + projetadas até a data de venda
+    let totalMensais = 0;
+    let mesesContados = 0;
+    for (let i = 0; i < prazoMeses; i++) {
+      const d = new Date(inicio); d.setMonth(d.getMonth() + i);
+      const mesKey = `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}`;
+      if (mesKey > mesVenda) break;
+      const pg = pagas[mesKey];
+      totalMensais += pg ? pg.valorPago : parcelaProjEstimada;
+      mesesContados++;
+    }
+
+    // Parcelas especiais até a venda
+    const totalEspeciais = (im.parcelasEspeciais || [])
+      .filter(e => e.data <= mesVenda)
+      .reduce((s, e) => s + e.valor, 0);
+
+    // Despesas manuais
+    const despesas = (state.lancamentos || [])
+      .filter(l => l.imovelId === im.id && l.tipo === 'saida')
+      .reduce((s, l) => s + l.valor, 0);
+
+    custoTotal = entrada + totalMensais + totalEspeciais + despesas;
+
+    // Saldo devedor na data de venda: simula mês a mês até a venda
+    let saldo = valorContrato - entrada;
+    for (let i = 0; i < prazoMeses; i++) {
+      const d = new Date(inicio); d.setMonth(d.getMonth() + i);
+      const mesKey = `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}`;
+      if (mesKey > mesVenda) break;
+      const pg = pagas[mesKey];
+      const especiaisMes = (im.parcelasEspeciais || [])
+        .filter(e => e.data === mesKey).reduce((s, e) => s + e.valor, 0);
+      if (pg) {
+        saldo = Math.max(0, saldo - pg.valorPago - especiaisMes);
+      } else {
+        saldo = Math.max(0, (saldo * (1 + taxaMensal)) - parcelaProjEstimada - especiaisMes);
+      }
+    }
+    saldoNaVenda = saldo;
+    totalJuros = 0; // embutido nos boletos, não separado
+
+    detalheCusto = [
+      { label: 'Entrada paga', valor: entrada },
+      { label: `Parcelas mensais (${mesesContados} meses)`, valor: totalMensais },
+      { label: 'Parcelas especiais (anuais, chaves etc.)', valor: totalEspeciais },
+      { label: 'Despesas extras lançadas', valor: despesas },
+    ];
+
+  } else {
+    // BANCO: custo = preço de aquisição + juros pagos até a venda + despesas
+    const { totalJuros: tj, totalParcelas } = calcTotalJurosPagos(im, dataVenda.toISOString());
+    totalJuros = tj;
+
+    // Saldo devedor na data de venda (banco: percorre tabela SAC/PRICE)
+    const amort = gerarAmortizacao(im);
+    const inicio = new Date((fin?.dataInicio || im.dataAquisicao || getMesAtual()) + '-02');
+    let saldo = fin?.saldoDevedor || 0;
+    amort.forEach((r, i) => {
+      const d = new Date(inicio); d.setMonth(d.getMonth() + i);
+      if (d <= dataVenda) saldo = Math.max(0, saldo - r.amort);
+    });
+    saldoNaVenda = saldo;
+
+    const aqs = im.precoAquisicao || 0;
+    const despesas = (state.lancamentos || [])
+      .filter(l => l.imovelId === im.id && l.tipo === 'saida')
+      .reduce((s, l) => s + l.valor, 0);
+
+    custoTotal = aqs + totalJuros + despesas;
+    detalheCusto = [
+      { label: 'Preço de aquisição', valor: aqs },
+      { label: 'Total de juros pagos ao banco', valor: totalJuros },
+      { label: 'Despesas extras lançadas', valor: despesas },
+    ];
+  }
+
   const receitaLiquida = valorFuturo - saldoNaVenda;
   const lucro = receitaLiquida - custoTotal;
   const roi = custoTotal > 0 ? (lucro / custoTotal) * 100 : 0;
-  const roiAnual = Math.pow(1 + roi / 100, 1 / anos) - 1;
-
-  const valMin = calcValorizacaoMinima(im, anos);
+  const roiAnual = anos > 0 ? (Math.pow(1 + roi / 100, 1 / anos) - 1) * 100 : 0;
+  const valMin = custoTotal > 0 && vm > 0 ? (Math.pow(custoTotal / vm, 1 / anos) - 1) * 100 : null;
 
   const res = document.getElementById('analise-resultado');
   if (!res) return;
@@ -1676,28 +1759,43 @@ function calcularAnalise() {
     <div class="two-col">
       <div class="card">
         <div class="card-title" style="margin-bottom:16px">Projeção de venda em ${anos} ano${anos > 1 ? 's' : ''}</div>
-        <div style="display:flex;flex-direction:column;gap:12px">
+        <div style="display:flex;flex-direction:column;gap:0">
           <div style="display:flex;justify-content:space-between;padding:10px 0;border-bottom:1px solid var(--border)">
-            <span class="color-muted">Valor atual de mercado</span><span class="fw-600 text-mono">${fmtBRL(vm)}</span>
+            <span class="color-muted">Valor atual de mercado</span>
+            <span class="fw-600 text-mono">${fmtBRL(vm)}</span>
           </div>
           <div style="display:flex;justify-content:space-between;padding:10px 0;border-bottom:1px solid var(--border)">
-            <span class="color-muted">Valor futuro estimado (${valorAnual}%/a.a.)</span><span class="fw-600 text-mono">${fmtBRL(valorFuturo)}</span>
+            <span class="color-muted">Valor futuro estimado (${valorAnual}%/a.a.)</span>
+            <span class="fw-600 text-mono">${fmtBRL(valorFuturo)}</span>
           </div>
+          ${saldoNaVenda > 0 ? `
           <div style="display:flex;justify-content:space-between;padding:10px 0;border-bottom:1px solid var(--border)">
-            <span class="color-muted">(-) Saldo devedor na venda</span><span class="fw-600 text-mono color-danger">- ${fmtBRL(saldoNaVenda)}</span>
-          </div>
+            <span class="color-muted">(-) Saldo devedor na venda</span>
+            <span class="fw-600 text-mono color-danger">- ${fmtBRL(saldoNaVenda)}</span>
+          </div>` : ''}
           <div style="display:flex;justify-content:space-between;padding:10px 0;border-bottom:1px solid var(--border)">
-            <span class="color-muted">Receita líquida da venda</span><span class="fw-600 text-mono">${fmtBRL(receitaLiquida)}</span>
+            <span class="color-muted">Receita líquida da venda</span>
+            <span class="fw-600 text-mono">${fmtBRL(receitaLiquida)}</span>
           </div>
-          <div style="display:flex;justify-content:space-between;padding:10px 0;border-bottom:1px solid var(--border)">
-            <span class="color-muted">(-) Custo total acumulado</span><span class="fw-600 text-mono color-danger">- ${fmtBRL(custoTotal)}</span>
+
+          <div style="padding:10px 0;border-bottom:1px solid var(--border)">
+            <div style="display:flex;justify-content:space-between;margin-bottom:8px">
+              <span class="color-muted fw-600">(-) Custo total acumulado</span>
+              <span class="fw-600 text-mono color-danger">- ${fmtBRL(custoTotal)}</span>
+            </div>
+            ${detalheCusto.filter(d => d.valor > 0).map(d => `
+              <div style="display:flex;justify-content:space-between;font-size:12px;color:var(--text3);padding:2px 0 2px 12px">
+                <span>${d.label}</span><span class="text-mono">${fmtBRL(d.valor)}</span>
+              </div>`).join('')}
           </div>
-          <div style="display:flex;justify-content:space-between;padding:12px;background:${lucro >= 0 ? 'var(--success-light)' : 'var(--danger-light)'};border-radius:var(--radius-sm)">
+
+          <div style="display:flex;justify-content:space-between;padding:14px 12px;margin-top:4px;background:${lucro >= 0 ? 'var(--success-light)' : 'var(--danger-light)'};border-radius:var(--radius-sm)">
             <span style="font-weight:600;color:${lucro >= 0 ? 'var(--success)' : 'var(--danger)'}">Lucro / Prejuízo</span>
-            <span style="font-weight:700;font-family:var(--mono);font-size:16px;color:${lucro >= 0 ? 'var(--success)' : 'var(--danger)'}">${fmtBRL(lucro)}</span>
+            <span style="font-weight:700;font-family:var(--mono);font-size:18px;color:${lucro >= 0 ? 'var(--success)' : 'var(--danger)'}">${fmtBRL(lucro)}</span>
           </div>
         </div>
       </div>
+
       <div class="card">
         <div class="card-title" style="margin-bottom:16px">Indicadores do investimento</div>
         <div style="display:flex;flex-direction:column;gap:14px">
@@ -1707,22 +1805,29 @@ function calcularAnalise() {
           </div>
           <div>
             <div class="metric-label">ROI anualizado</div>
-            <div class="metric-value ${roiAnual >= 0 ? 'metric-pos' : 'metric-neg'}">${fmtPct(roiAnual * 100)}/a.a.</div>
+            <div class="metric-value ${roiAnual >= 0 ? 'metric-pos' : 'metric-neg'}">${fmtPct(roiAnual)}/a.a.</div>
           </div>
-          <div>
-            <div class="metric-label">Total de juros pagos</div>
+          ${!isConstrutora(im) ? `<div>
+            <div class="metric-label">Total de juros pagos ao banco</div>
             <div class="metric-value metric-neg">${fmtBRL(totalJuros)}</div>
-          </div>
+          </div>` : `<div>
+            <div class="metric-label">Tipo de financiamento</div>
+            <div style="font-size:13px;color:var(--text2)">Construtora — juros embutidos nos boletos<br>Índice: ${fin?.indiceCorrecao || '—'}</div>
+          </div>`}
           <div class="divider"></div>
           <div>
             <div class="metric-label">Valorização mínima para ponto de equilíbrio</div>
-            <div class="metric-value ${valMin && valMin > 12 ? 'metric-neg' : valMin && valMin > 8 ? 'metric-warn' : 'metric-pos'}">${valMin !== null ? '+' + fmtPct(valMin) + '/a.a.' : 'Quitado'}</div>
+            <div class="metric-value ${valMin !== null && valMin > 12 ? 'metric-neg' : valMin !== null && valMin > 8 ? 'metric-warn' : 'metric-pos'}">
+              ${valMin !== null ? '+' + fmtPct(valMin) + '/a.a.' : '—'}
+            </div>
             <div class="metric-sub">abaixo disso o investimento dá prejuízo</div>
           </div>
           <div class="${valorAnual >= (valMin || 0) ? 'alert alert-info' : 'alert alert-warn'}" style="margin-bottom:0">
-            ${valorAnual >= (valMin || 0)
-              ? `Com ${valorAnual}%/a.a. de valorização, o investimento é lucrativo.`
-              : `Com ${valorAnual}%/a.a., o imóvel não cobre o custo do financiamento. Precisa de pelo menos ${fmtPct(valMin || 0)}/a.a.`}
+            ${valMin !== null
+              ? valorAnual >= valMin
+                ? `Com ${valorAnual}%/a.a. de valorização, o investimento é lucrativo.`
+                : `Com ${valorAnual}%/a.a., o imóvel não cobre o custo. Precisa de pelo menos ${fmtPct(valMin)}/a.a.`
+              : 'Informe os dados do imóvel para calcular.'}
           </div>
         </div>
       </div>
