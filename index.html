@@ -1970,7 +1970,7 @@ function closeModalOnOverlay(e) { if (e.target === document.getElementById('moda
 // ─── AUTENTICAÇÃO POR SENHA ────────────────────────────────────────────────
 const ENCRYPTED_TOKEN = 'cfd85e9461d514f2c2b3a9c08a803d4b:0217dfc768692afc263546ee57aafd3e135a6c2b00921bec2055b7e821926c263eb964565db5c0a83e13e8a3662ab120';
 const SALT = 'patrimonio_imoveis_salt_2024';
-const GIST_ID = ''; // será preenchido após criar o gist
+const GIST_ID = '408a0e3337b641c84fcaa85aa148c00e';
 
 async function deriveKey(senha) {
   const enc = new TextEncoder();
@@ -1993,11 +1993,14 @@ async function decryptToken(senha) {
 }
 
 async function tentarLoginAutomatico() {
-  // Tenta senha salva no navegador
   const senhaSalva = sessionStorage.getItem('pat_session');
   if (senhaSalva) {
     const token = await decryptToken(senhaSalva);
-    if (token) { state.gistToken = token; return true; }
+    if (token) {
+      state.gistToken = token;
+      state.gistId = GIST_ID;
+      return true;
+    }
   }
   return false;
 }
@@ -2030,11 +2033,11 @@ async function fazerLogin() {
   if (!token) { erro.textContent = 'Senha incorreta'; return; }
   sessionStorage.setItem('pat_session', senha);
   state.gistToken = token;
+  state.gistId = GIST_ID;
   updateGistStatus();
-  // Carrega gist se tiver ID configurado
-  if (state.gistId) {
-    await loadGist();
-  }
+  erro.textContent = 'Carregando dados...';
+  const ok = await loadGist();
+  if (ok) saveLocal();
   showPage('dashboard');
 }
 
@@ -2078,7 +2081,8 @@ document.getElementById('content').innerHTML = `
 fetchDataHoje().then(async () => {
   const logado = await tentarLoginAutomatico();
   if (logado) {
-    if (state.gistId) await loadGist();
+    await loadGist();
+    saveLocal();
     showPage('dashboard');
   } else {
     showLoginScreen();
