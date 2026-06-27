@@ -282,12 +282,18 @@ async function saveGist() {
 }
 
 async function loadGist() {
-  if (!state.gistToken || !state.gistId) return false;
+  if (!state.gistToken || !state.gistId) {
+    console.warn('loadGist: token ou gistId ausente', { token: !!state.gistToken, gistId: state.gistId });
+    return false;
+  }
   try {
     const r = await fetch(`https://api.github.com/gists/${state.gistId}`, {
       headers: { Authorization: `token ${state.gistToken}` }
     });
-    if (!r.ok) return false;
+    if (!r.ok) {
+      console.error('loadGist: erro HTTP', r.status, r.statusText);
+      return false;
+    }
     const gist = await r.json();
     const content = gist.files['patrimonio.json']?.content;
     if (content) {
@@ -296,8 +302,12 @@ async function loadGist() {
       state.lancamentos = data.lancamentos || [];
       saveLocal();
     }
+    updateGistStatus();
     return true;
-  } catch(e) { return false; }
+  } catch(e) {
+    console.error('loadGist: exceção', e);
+    return false;
+  }
 }
 
 async function createGist(token) {
@@ -1414,7 +1424,7 @@ function deletarParcelaEspecial(imovelId, parcelaId) {
 }
 
 // ─── FLUXO DE CAIXA ───────────────────────────────────────────────────────────
-let fluxoMesSelecionado = getMesAtual();
+let fluxoMesSelecionado = null; // será inicializado após fetchDataHoje()
 
 function getSaidasFinanciamentoMes(mes) {
   const auto = [];
@@ -1448,6 +1458,8 @@ function getSaidasFinanciamentoMes(mes) {
 }
 
 function renderFluxo() {
+  // Inicializa com o mês atual na primeira vez que é chamado
+  if (!fluxoMesSelecionado) fluxoMesSelecionado = getMesAtual();
   const mes = fluxoMesSelecionado;
 
   document.getElementById('topbar-actions').innerHTML = `
@@ -2029,10 +2041,12 @@ async function fazerLogin() {
   sessionStorage.setItem('pat_session', senha);
   state.gistToken = token;
   state.gistId = GIST_ID;
-  updateGistStatus();
-  erro.textContent = 'Carregando dados...';
+  erro.textContent = 'Carregando dados do servidor...';
   const ok = await loadGist();
-  if (ok) saveLocal();
+  if (!ok) {
+    console.warn('loadGist falhou no login — usando dados locais');
+  }
+  updateGistStatus();
   showPage('dashboard');
 }
 
@@ -2076,8 +2090,9 @@ document.getElementById('content').innerHTML = `
 fetchDataHoje().then(async () => {
   const logado = await tentarLoginAutomatico();
   if (logado) {
-    await loadGist();
-    saveLocal();
+    const ok = await loadGist();
+    if (!ok) console.warn('Auto-login: loadGist falhou, usando dados locais');
+    updateGistStatus();
     showPage('dashboard');
   } else {
     showLoginScreen();
