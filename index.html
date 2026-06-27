@@ -356,6 +356,26 @@ function parseBRL(s) {
   if (!s) return 0;
   return parseFloat(s.toString().replace(/[^\d,.-]/g, '').replace(',', '.')) || 0;
 }
+
+// Escapa HTML para evitar XSS ao renderizar dados do usuário via innerHTML
+function esc(str) {
+  if (!str) return '';
+  return String(str)
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#39;');
+}
+
+// Valida campos numéricos financeiros
+function validarValor(val, campo, opts = {}) {
+  const { min = 0, max = 999999999, obrigatorio = true } = opts;
+  if (obrigatorio && (!val || isNaN(val))) return `${campo} é obrigatório`;
+  if (val < min) return `${campo} não pode ser negativo`;
+  if (val > max) return `${campo} parece muito alto — verifique`;
+  return null;
+}
 function fmtDate(d) {
   if (!d) return '—';
   const [y, m] = d.split('-');
@@ -1000,13 +1020,16 @@ function salvarImovel(id) {
       dataInicio: document.getElementById('f-inicio').value,
     };
   }
+  const precoAq = parseFloat(document.getElementById('f-preco').value) || 0;
+  const erroPreco = validarValor(precoAq, 'Preço de aquisição', { min: 0 });
+  if (erroPreco) { alert(erroPreco); return; }
   const obj = {
     id: id || Date.now().toString(),
-    nome,
-    empreendimento: document.getElementById('f-empreendimento').value,
+    nome: esc(nome),
+    empreendimento: esc(document.getElementById('f-empreendimento').value),
     tipo: document.getElementById('f-tipo').value,
     dataAquisicao: document.getElementById('f-data').value,
-    precoAquisicao: parseFloat(document.getElementById('f-preco').value) || 0,
+    precoAquisicao: precoAq,
     valorMercado: parseFloat(document.getElementById('f-vm').value) || 0,
     obs: document.getElementById('f-obs').value,
     financiamento
@@ -1392,12 +1415,14 @@ function salvarParcelaEspecial(imovelId) {
   const im = state.imoveis.find(i => i.id === imovelId);
   if (!im) return;
   if (!im.parcelasEspeciais) im.parcelasEspeciais = [];
+  const erroEsp = validarValor(valor, 'Valor da parcela', { min: 0.01 });
+  if (erroEsp) { alert(erroEsp); return; }
   im.parcelasEspeciais.push({
     id: Date.now().toString(),
     tipo: document.getElementById('pe-tipo').value,
     data,
     valor,
-    descricao: document.getElementById('pe-desc').value,
+    descricao: esc(document.getElementById('pe-desc').value),
     pago: document.getElementById('pe-pago').value === 'true'
   });
   save();
@@ -1588,19 +1613,19 @@ function openModalLancamento(tipoDefault) {
 function salvarLancamento() {
   const desc = document.getElementById('l-desc').value.trim();
   const valor = parseFloat(document.getElementById('l-valor').value);
-  if (!desc || !valor) { alert('Preencha descrição e valor'); return; }
+  if (!desc) { alert('Preencha a descrição'); return; }
+  const erroValor = validarValor(valor, 'Valor', { min: 0.01 });
+  if (erroValor) { alert(erroValor); return; }
   state.lancamentos = state.lancamentos || [];
   state.lancamentos.push({
     id: Date.now().toString(),
     tipo: document.getElementById('l-tipo').value,
     mes: document.getElementById('l-mes').value,
-    descricao: desc,
+    descricao: esc(desc),
     valor,
     imovelId: document.getElementById('l-imovel').value
   });
-  save();
-  closeModal();
-  renderFluxo();
+  save(); closeModal(); renderFluxo();
 }
 
 function deletarLancamento(id) {
