@@ -1414,7 +1414,8 @@ function deletarParcelaEspecial(imovelId, parcelaId) {
 }
 
 // ─── FLUXO DE CAIXA ───────────────────────────────────────────────────────────
-// Gera saídas automáticas do financiamento para um mês
+let fluxoMesSelecionado = getMesAtual();
+
 function getSaidasFinanciamentoMes(mes) {
   const auto = [];
   state.imoveis.forEach(im => {
@@ -1424,8 +1425,7 @@ function getSaidasFinanciamentoMes(mes) {
     if (p) {
       auto.push({
         id: `fin_mensal_${im.id}_${mes}`,
-        tipo: 'saida',
-        mes,
+        tipo: 'saida', mes,
         descricao: `Parcela mensal — ${im.nome}`,
         valor: p.parcela,
         imovelId: im.id,
@@ -1433,12 +1433,10 @@ function getSaidasFinanciamentoMes(mes) {
         detalhe: `Amort: ${fmtBRL(p.amort)} | Juros: ${fmtBRL(p.juros)}`
       });
     }
-    // Parcelas especiais do mês
     (im.parcelasEspeciais || []).filter(pe => pe.data === mes).forEach(pe => {
       auto.push({
         id: `fin_esp_${pe.id}`,
-        tipo: 'saida',
-        mes,
+        tipo: 'saida', mes,
         descricao: `${pe.descricao || pe.tipo} — ${im.nome}`,
         valor: pe.valor,
         imovelId: im.id,
@@ -1450,19 +1448,19 @@ function getSaidasFinanciamentoMes(mes) {
 }
 
 function renderFluxo() {
-  const mesAtual = getMesAtual();
+  const mes = fluxoMesSelecionado;
+
   document.getElementById('topbar-actions').innerHTML = `
-    <input type="month" id="mes-filtro" value="${mesAtual}" onchange="renderFluxo()" style="padding:6px 10px;border:1px solid var(--border2);border-radius:var(--radius-sm);font-size:13px;background:var(--surface)">
+    <input type="month" id="mes-filtro" value="${mes}"
+      onchange="fluxoMesSelecionado=this.value; renderFluxo()"
+      style="padding:6px 10px;border:1px solid var(--border2);border-radius:var(--radius-sm);font-size:13px;background:var(--surface)">
     <button class="btn btn-primary btn-sm" onclick="openModalLancamento()">+ Lançamento manual</button>`;
 
-  const mes = document.getElementById('mes-filtro')?.value || mesAtual;
   const lancMes = (state.lancamentos || []).filter(l => l.mes === mes);
   const autoSaidas = getSaidasFinanciamentoMes(mes);
-
   const entradas = lancMes.filter(l => l.tipo === 'entrada');
   const saidasManuais = lancMes.filter(l => l.tipo === 'saida');
   const todasSaidas = [...autoSaidas, ...saidasManuais];
-
   const totalEnt = entradas.reduce((s, l) => s + l.valor, 0);
   const totalSai = todasSaidas.reduce((s, l) => s + l.valor, 0);
   const totalFinanciamento = autoSaidas.reduce((s, l) => s + l.valor, 0);
@@ -1494,7 +1492,6 @@ function renderFluxo() {
 
       <div class="card">
         <div class="card-header"><span class="card-title">Saídas</span><button class="btn btn-ghost btn-sm" onclick="openModalLancamento('saida')">+ Adicionar manual</button></div>
-
         ${autoSaidas.length > 0 ? `
           <div style="font-size:11px;font-weight:600;color:var(--text3);text-transform:uppercase;letter-spacing:0.05em;margin-bottom:8px;display:flex;align-items:center;gap:6px">
             <span style="width:8px;height:8px;border-radius:50%;background:var(--accent);display:inline-block"></span>
@@ -1517,7 +1514,6 @@ function renderFluxo() {
             }).join('')}
           </tbody></table>
         ` : ''}
-
         ${saidasManuais.length > 0 ? `
           <div style="font-size:11px;font-weight:600;color:var(--text3);text-transform:uppercase;letter-spacing:0.05em;margin-bottom:8px;display:flex;align-items:center;gap:6px">
             <span style="width:8px;height:8px;border-radius:50%;background:var(--text3);display:inline-block"></span>
@@ -1532,7 +1528,6 @@ function renderFluxo() {
             </tr>`).join('')}
           </tbody></table>
         ` : ''}
-
         ${todasSaidas.length === 0
           ? `<div style="text-align:center;padding:30px;color:var(--text3);font-size:13px">Nenhuma saída neste mês</div>`
           : ''}
