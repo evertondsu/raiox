@@ -2001,14 +2001,17 @@ async function decryptToken(senha) {
 
 async function tentarLoginAutomatico() {
   const senhaSalva = sessionStorage.getItem('pat_session');
-  if (senhaSalva) {
+  if (!senhaSalva) return false;
+  try {
     const token = await decryptToken(senhaSalva);
     if (token) {
       state.gistToken = token;
       state.gistId = GIST_ID;
       return true;
     }
-  }
+  } catch(e) {}
+  // Sessão inválida — limpa e força nova autenticação
+  sessionStorage.removeItem('pat_session');
   return false;
 }
 
@@ -2076,7 +2079,6 @@ async function fetchDataHoje() {
 
 // ─── INIT ─────────────────────────────────────────────────────────────────────
 loadLocal();
-updateGistStatus();
 
 document.getElementById('content').innerHTML = `
   <div style="display:flex;align-items:center;justify-content:center;height:200px;gap:12px;color:var(--text3)">
@@ -2088,6 +2090,10 @@ document.getElementById('content').innerHTML = `
   <style>@keyframes spin{to{transform:rotate(360deg)}}</style>`;
 
 fetchDataHoje().then(async () => {
+  // Limpa token do state — sempre precisa de autenticação via senha
+  state.gistToken = '';
+  state.gistId = '';
+
   const logado = await tentarLoginAutomatico();
   if (logado) {
     const ok = await loadGist();
